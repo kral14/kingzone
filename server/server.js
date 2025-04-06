@@ -23,7 +23,11 @@ const PORT = process.env.PORT || 3000; // Render portu avtomatik təyin edəcək
 // Bizə isə /public qovluğu lazımdır, ona görə bir qovluq yuxarı çıxıb public-ə giririk
 const publicDirectoryPath = path.join(__dirname, '../public');
 app.use(express.static(publicDirectoryPath));
-
+// Default route to redirect to login page
+app.get('/', (req, res) => {
+    // Redirect to the login page relative to the root
+    res.redirect('/ANA SEHIFE/login/login.html');
+});
 // ----- Oyun Məntiqi və Otaq İdarəetməsi (Sadələşdirilmiş) -----
 
 let rooms = {}; // Otaqları yadda saxlamaq üçün obyekt (server restart olanda silinir)

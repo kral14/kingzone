@@ -1,0 +1,162 @@
+/* register.css - Qeydiyyat Sayfası Stilleri (Yeni Tema) */
+
+/* Login.css-dəki CSS dəyişənlərini burada da istifadə edirik */
+:root {
+    --primary-color: #4a90e2;
+    --background-color: #1a1a2e;
+    --card-background: #2a2a4e;
+    --text-color: #e0e0ff;
+    --subtle-text: #a0a0cc;
+    --border-color: #4a4a8e;
+    --button-bg: #39ff14; /* Neon Yeşil */
+    --button-text: #111;
+    --input-bg: #161625;
+    --input-border: #3a3a6e;
+    --link-color: var(--primary-color);
+    --link-hover-color: #6aaaff;
+    --error-color: #ff4d4d; /* Qırmızı */
+    --error-bg: rgba(255, 77, 77, 0.15);
+    --error-border: rgba(255, 77, 77, 0.5);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Nunito', sans-serif;
+    background: linear-gradient(to bottom, var(--input-bg), var(--background-color));
+    color: var(--text-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+}
+
+/* Login konteynerinə oxşar, amma fərqli klass adı */
+.register-container {
+    background-color: var(--card-background);
+    padding: 35px 40px;
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-color);
+    width: 100%;
+    max-width: 450px; /* Biraz daha geniş ola bilər */
+    text-align: center;
+    position: relative;
+    z-index: 1;
+}
+
+h2 {
+    margin-bottom: 25px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 1.8em;
+    text-shadow: 0 0 6px var(--primary-color);
+}
+.input-group {
+    margin-bottom: 20px;
+    text-align: left;
+}
+.input-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+    font-size: 0.95em;
+    color: var(--subtle-text);
+}
+.input-group input {
+    width: 100%;
+    padding: 12px 15px;
+    background-color: var(--input-bg);
+    color: var(--text-color);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    font-size: 1rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.input-group input::placeholder {
+    color: #777799;
+}
+.input-group input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.25);
+}
+/* Şifrə inputları üçün text-security (əgər type="text" istifadə olunarsa) */
+input[type="password"] {
+    /* Standart şifrə maskalanması işləməlidir */
+}
+
+button#register-button { /* ID düzəldildi */
+    width: 100%;
+    padding: 12px;
+    background-color: var(--button-bg);
+    color: var(--button-text);
+    border: none;
+    border-radius: 6px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    margin-top: 10px; /* Mesajdan sonra boşluq */
+}
+button#register-button:hover {
+    background-color: #2fcc11;
+    transform: scale(1.02);
+}
+button#register-button:active {
+    transform: scale(0.98);
+}
+/* Disabled state for button */
+button#register-button:disabled {
+    background-color: #aaa;
+    cursor: not-allowed;
+    transform: none;
+    opacity: 0.7;
+}
+
+/* Giriş səhifəsinə link */
+.login-link-container {
+    margin-top: 25px;
+    font-size: 0.9em;
+    color: var(--subtle-text);
+}
+
+.login-link-container a {
+    color: var(--link-color);
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.2s ease, text-decoration 0.2s ease;
+}
+
+.login-link-container a:hover {
+    color: var(--link-hover-color);
+    text-decoration: underline;
+}
+
+/* Xəta Mesajı Stili */
+.message { /* Klass adı .message olaraq dəyişdirildi */
+    margin-top: 15px;
+    margin-bottom: 10px; /* Düymədən əvvəl boşluq */
+    font-size: 0.9rem;
+    min-height: 1.3em; /* İçərik olmadıqda belə yer tutsun */
+    font-weight: 600;
+    padding: 8px 12px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    text-align: center;
+    color: var(--error-color);
+    /* Başlanğıcda boş olduğu üçün arxa fon vermirik */
+    /* background-color: var(--error-bg); */
+    /* border-color: var(--error-border); */
+}
+
+/* Xəta mesajı dolu olduqda stil */
+.message:not(:empty) { /* :empty pseudo-class */
+    background-color: var(--error-bg);
+    border-color: var(--error-border);
+}

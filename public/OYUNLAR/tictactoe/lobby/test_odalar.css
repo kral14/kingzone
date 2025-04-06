@@ -1,0 +1,236 @@
+/* test_odalar.css (v16 - Gözden Geçirilmiş ve Yorumlu) */
+
+/* Renkler ve Temel Ayarlar */
+:root {
+    --primary-color: #4a90e2;
+    --secondary-color: #f5a623;
+    --success-color: #39ff14;
+    --danger-color: #ff4d4d;
+    --warning-color: #ffc107; /* Kurucu adı hover & oyuncu adı hover için */
+    --background-color: #1a1a2e;
+    --card-background: #2a2a4e;
+    --text-color: #e0e0ff;
+    --subtle-text: #a0a0cc;
+    --border-color: #4a4a8e;
+    --player1-color: #00ffff;
+    --player2-color: #ff00ff;
+    --neon-glow-blue: rgba(0, 200, 255, 0.7); /* Kart hover rengi */
+    --neon-glow-pink: rgba(255, 0, 255, 0.7);
+    --neon-separator1: #00ffff;
+    --neon-separator2: #ff00ff;
+    --hover-lift: -4px;
+    --transition-speed: 0.25s;
+    --animation-duration: 0.35s;
+    --tooltip-bg: #333;
+    --tooltip-text: #fff;
+    --hover-text-color: #ffc107; /* Sarı */
+    --player-hover-bg: rgba(255, 255, 255, 0.08); /* Varsayılan oyuncu hover BG */
+    --mustafa-hover-bg: rgba(74, 144, 226, 0.2); /* Mustafa için farklı hover BG */
+    --mustafa-hover-border: #4a90e2;        /* Mustafa için farklı hover border */
+}
+
+/* Genel Stiller */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Nunito', sans-serif;
+    background: linear-gradient(to bottom, #161625, #1a1a2e);
+    line-height: 1.5;
+    color: var(--text-color);
+    padding: 15px; padding-bottom: 60px; min-height: 100vh;
+}
+header {
+    background: linear-gradient(90deg, #6a11cb, #2575fc);
+    color: white; padding: 0.9rem 1.8rem; display: flex;
+    justify-content: space-between; align-items: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3); margin-bottom: 35px;
+    border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);
+}
+header h1 { margin: 0; font-size: 1.5rem; font-weight: 700; font-family: 'Orbitron', sans-serif; }
+header div { display: flex; gap: 12px; align-items: center; }
+.header-link { color: white; text-decoration: none; font-size: 0.9rem; font-weight: 600; padding: 6px 12px; background-color: rgba(255, 255, 255, 0.1); border-radius: 5px; transition: background-color var(--transition-speed) ease, transform var(--transition-speed) ease; border: 1px solid transparent; }
+.header-link:hover { background-color: rgba(255, 255, 255, 0.2); transform: scale(1.05); border-color: rgba(255, 255, 255, 0.3); }
+main { padding: 2.5rem; max-width: 1100px; margin: 20px auto; background-color: rgba(40, 40, 78, 0.85); backdrop-filter: blur(8px); border-radius: 12px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); }
+#welcome-text { text-align: center; margin-bottom: 2rem; color: var(--subtle-text); font-size: 1.1em;}
+h2 { margin-bottom: 2rem; text-align: center; color: #fff; font-weight: 700; font-size: 1.8em; text-shadow: 0 0 8px rgba(var(--primary-color), 0.5); }
+
+/* Buton Stili */
+.button { display: inline-flex; align-items: center; gap: 8px; padding: 11px 24px; background-color: var(--success-color); color: #111; border: none; border-radius: 6px; font-size: 1rem; font-weight: 700; cursor: pointer; text-decoration: none; text-align: center; transition: background-color var(--transition-speed) ease, transform var(--transition-speed) ease, box-shadow var(--transition-speed) ease; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); }
+.button.create-button:hover { background-color: #218838; transform: translateY(var(--hover-lift)) scale(1.03); box-shadow: 0 7px 15px rgba(0, 0, 0, 0.3), 0 0 15px rgba(57, 255, 20, 0.5); }
+.button:active { transform: translateY(-1px) scale(0.98); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2); }
+.button.primary { background: linear-gradient(45deg, #8e2de2, #4a00e0); color: #fff; }
+.button.primary:hover { box-shadow: 0 7px 15px rgba(0, 0, 0, 0.3), 0 0 15px rgba(142, 45, 226, 0.5); }
+.center-button-container { text-align: center; margin-top: 35px; }
+
+/* Oda Listesi - GRID YAPISI */
+.room-list { list-style: none; padding: 0; margin-bottom: 2rem; min-height: 50px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; }
+#info-message-area { grid-column: 1 / -1; text-align: center; color: var(--subtle-text); padding: 40px 0; font-style: italic; font-size: 1.1em; }
+
+/* --- Oda Kutusu Stilleri --- */
+.room-item {
+    background-color: var(--card-background);
+    border-radius: 8px; padding: 0; display: flex; flex-direction: column;
+    border: 1px solid var(--border-color); box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    position: relative;
+    overflow: visible; /* Tooltip'in dışarı taşabilmesi için */
+    opacity: 0; /* Başlangıçta gizli */
+    transition: opacity var(--animation-duration) ease-out,
+                box-shadow var(--transition-speed) ease,
+                border-color var(--transition-speed) ease,
+                transform var(--transition-speed) ease;
+}
+.room-item.entering { opacity: 1; }
+.room-item.exiting { opacity: 0; transform: scale(0.9) translateY(-10px); transition-duration: var(--animation-duration); }
+
+/* Genel Kart Hover Efekti */
+.room-item:not(.exiting):hover {
+    transform: translateY(var(--hover-lift)) scale(1.02);
+    border-color: var(--neon-glow-blue);
+    box-shadow: 0 0 10px var(--neon-glow-blue), 0 6px 15px rgba(0, 0, 0, 0.5);
+}
+.room-item:not(.exiting):hover .room-item-separator {
+    opacity: 1;
+    box-shadow: 0 0 8px var(--neon-separator1), 0 0 8px var(--neon-separator2),
+                0 0 15px rgba(0, 255, 255, 0.5), 0 0 15px rgba(255, 0, 255, 0.5);
+}
+
+/* --- Üst Satır Elemanları --- */
+.room-item-line1 { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; width: 100%; }
+
+/* Oda Adı Alanı */
+.room-name {
+    font-weight: 700; font-size: 1.1em;
+    color: var(--text-color);
+    flex-grow: 1; margin-right: 10px;
+    cursor: pointer; position: relative;
+    height: 1.5em; line-height: 1.5em;
+    overflow: hidden; display: block;
+    perspective: 800px;
+    opacity: 0;
+}
+.room-item.entering .room-name { animation: slideInFromLeft 0.5s ease-out forwards; }
+@keyframes slideInFromLeft { from { transform: translateX(-25px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* Oda Adı İçindeki Metin Span'ları */
+.room-name .display-text {
+    display: block; position: absolute; width: 100%;
+    top: 50%; left: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding: 0 5px; box-sizing: border-box;
+    backface-visibility: hidden;
+    transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+    font-size: 1em; font-weight: inherit; line-height: inherit;
+}
+@keyframes slotMachineOut { 0% { transform: translateY(-50%); opacity: 1; } 100% { transform: translateY(-150%); opacity: 0; } }
+@keyframes slotMachineIn { 0% { transform: translateY(50%); opacity: 0; } 100% { transform: translateY(-50%); opacity: 1; } }
+.room-name .original-text { transform: translateY(-50%); opacity: 1; color: var(--text-color); }
+.room-name .hover-text { transform: translateY(50%); opacity: 0; color: var(--hover-text-color); font-style: italic; font-size: 0.9em; }
+.room-name.is-hovered .original-text { animation: slotMachineOut 0.3s ease-out forwards; }
+.room-name.is-hovered .hover-text { animation: slotMachineIn 0.4s ease-out 0.1s forwards; }
+
+/* Oda Durum İkonları */
+.room-status { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.room-status .players { font-size: 0.8em; color: #111; font-weight: 700; background-color: var(--secondary-color); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.room-status .lock-icon { font-size: 1em; color: var(--secondary-color); }
+
+/* Silme Butonu ve Tooltip */
+.delete-room-btn { background-color: transparent; color: var(--danger-color); border: none; border-radius: 50%; padding: 4px; font-size: 1em; cursor: pointer; transition: background-color var(--transition-speed) ease, color var(--transition-speed) ease; line-height: 0; position: relative; }
+.delete-room-btn:hover { background-color: rgba(255, 77, 77, 0.15); color: #ff88aa; }
+.delete-room-btn svg { vertical-align: middle; }
+.delete-room-btn::after { content: 'Odayı silebilirsiniz'; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%) scale(0.8); background-color: var(--tooltip-bg); color: var(--tooltip-text); padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; z-index: 10; opacity: 0; visibility: hidden; transition: opacity var(--transition-speed) ease, transform var(--transition-speed) ease, visibility var(--transition-speed) ease; pointer-events: none; margin-bottom: 6px; }
+.delete-room-btn::before { content: ''; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 1px; border-width: 5px; border-style: solid; border-color: var(--tooltip-bg) transparent transparent transparent; opacity: 0; visibility: hidden; transition: opacity var(--transition-speed) ease, visibility var(--transition-speed) ease; pointer-events: none; z-index: 10; }
+.delete-room-btn:hover::after, .delete-room-btn:hover::before { opacity: 1; visibility: visible; transform: translateX(-50%) scale(1); }
+.delete-room-btn:hover::before { transform: translateX(-50%); }
+
+/* Neon Ayırıcı Çizgi */
+.room-item-separator { height: 2px; width: 90%; margin: 5px auto 8px auto; background: linear-gradient(90deg, transparent, var(--neon-separator1), var(--neon-separator2), transparent); border-radius: 1px; opacity: 0.7; box-shadow: 0 0 3px var(--neon-separator1), 0 0 3px var(--neon-separator2); animation: separatorPulse 2s infinite ease-in-out alternate; transition: box-shadow var(--transition-speed) ease, opacity var(--transition-speed) ease; }
+@keyframes separatorPulse { from { opacity: 0.5; box-shadow: 0 0 2px var(--neon-separator1), 0 0 2px var(--neon-separator2); } to { opacity: 0.9; box-shadow: 0 0 6px var(--neon-separator1), 0 0 6px var(--neon-separator2); } }
+
+/* --- Alt Satır Elemanları --- */
+.room-item-line2 { display: flex; justify-content: center; align-items: center; width: 100%; padding: 10px 18px; min-height: 35px; }
+.player-name-display { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; }
+
+/* Oyuncu Adı Stilleri */
+.player1-name, .player2-name {
+    font-weight: 600;
+    display: inline-block; padding: 1px 5px; border-radius: 3px;
+    position: relative; border: 1px solid transparent;
+    transition: transform var(--transition-speed) ease, color var(--transition-speed) ease, background-color var(--transition-speed) ease, text-shadow var(--transition-speed) ease, border-color var(--transition-speed) ease;
+    cursor: default;
+}
+.player1-name { color: var(--player1-color); }
+.player2-name { color: var(--player2-color); }
+
+.player1-name.is-hovered-player,
+.player2-name.is-hovered-player {
+    transform: scale(1.05);
+    color: var(--hover-text-color);
+    background-color: var(--player-hover-bg);
+}
+.player1-name.is-mustafa-hover,
+.player2-name.is-mustafa-hover {
+    cursor: pointer;
+    background-color: var(--mustafa-hover-bg);
+    color: var(--text-color);
+    border-color: var(--mustafa-hover-border);
+    transform: scale(1.05);
+}
+.player-hover-info.mustafa-hover-info {
+    position: absolute; bottom: 110%; left: 50%;
+    transform: translateX(-50%) translateY(5px) scale(0.9);
+    background-color: var(--tooltip-bg); color: var(--tooltip-text);
+    padding: 4px 8px; border-radius: 4px;
+    font-size: 0.8rem; font-weight: 600; white-space: nowrap;
+    z-index: 5; opacity: 0; visibility: hidden;
+    transition: opacity var(--transition-speed) ease, transform var(--transition-speed) ease, visibility var(--transition-speed) ease;
+    pointer-events: none;
+}
+.player1-name.is-mustafa-hover .player-hover-info.mustafa-hover-info,
+.player2-name.is-mustafa-hover .player-hover-info.mustafa-hover-info {
+    opacity: 1; visibility: visible;
+    transform: translateX(-50%) translateY(0) scale(1);
+}
+
+/* VS İkonu ve Boş Slot */
+.vs-icon { width: 0.9em; height: 0.9em; fill: var(--subtle-text); opacity: 0.7; }
+.empty-slot { color: var(--subtle-text); font-style: italic; font-size: 0.85em; font-weight: 400; }
+
+/* Modal Stilleri */
+.modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.7); padding-top: 60px; animation: backdropFadeIn var(--transition-speed) ease-out; }
+.modal-content { background-color: #3a3a3a; color: #eee; margin: 5% auto; padding: 35px 40px; border: 1px solid #555; width: 90%; max-width: 480px; border-radius: 10px; position: relative; box-shadow: 0 8px 25px rgba(0,0,0,0.3); animation: modalSlideIn var(--transition-speed) ease-out; }
+.close-button { color: #aaa; position: absolute; top: 15px; right: 20px; font-size: 30px; font-weight: bold; cursor: pointer; transition: color var(--transition-speed) ease; }
+.close-button:hover, .close-button:focus { color: #fff; }
+.modal h3 { text-align: center; margin-bottom: 25px; margin-top: 0; color: #fff; font-weight: 700; font-size: 1.4em; }
+.modal .input-group { margin-bottom: 20px; }
+.modal .input-group label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 0.95em; color: #ccc; }
+.modal .input-group input, .modal .input-group select { width: 100%; padding: 12px 15px; background-color: #555; color: #eee; border: 1px solid #666; border-radius: 6px; font-size: 1rem; box-sizing: border-box; transition: border-color var(--transition-speed) ease, box-shadow var(--transition-speed) ease; }
+.modal .input-group input::placeholder { color: #999; }
+.modal .input-group input:focus, .modal .input-group select:focus { outline: none; border-color: var(--primary-color); background-color: #666; box-shadow: 0 0 0 3px rgba(var(--primary-color), 0.2); }
+/* Şifre alanını gizle (type="text" olsa bile) */
+.modal .input-group input[type="text"]#new-room-password {
+    -webkit-text-security: disc;
+    text-security: disc;
+}
+.modal .button { width: 100%; padding: 12px; font-size: 1.1rem; margin-top: 15px; font-weight: 700; }
+.modal .message { margin-top: 18px; text-align: center; font-size: 0.95rem; min-height: 1.3em; font-weight: 600; padding: 10px; border-radius: 5px; }
+.message.error { color: #f8d7da; background-color: rgba(220, 53, 69, 0.7); border: 1px solid var(--danger-color); }
+.message.success { color: #d4edda; background-color: rgba(40, 167, 69, 0.7); border: 1px solid var(--success-color); }
+.message.info { color: #d1ecf1; background-color: rgba(23, 162, 184, 0.7); border: 1px solid #17a2b8; }
+
+/* YENİ: Modal Kural Bilgisi Stili */
+.modal-rule-info {
+    font-size: 0.85em;
+    font-style: italic;
+    color: var(--subtle-text, #a0a0cc);
+    margin-top: 8px; /* Select ile arasını aç */
+    margin-bottom: 5px; /* Butonla arasını ayarla */
+    min-height: 1.2em; /* İçerik değişince zıplamayı önle */
+    text-align: center;
+}
+
+/* Modal Animasyonları */
+@keyframes backdropFadeIn { from { background-color: rgba(0,0,0,0); } to { background-color: rgba(0,0,0,0.7); } }
+@keyframes modalSlideIn { from { opacity: 0; transform: translateY(-40px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Küçük Ekran Ayarlamaları */
+@media (max-width: 992px) { .room-list { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); } main { max-width: 700px; } }
+@media (max-width: 600px) { .room-list { grid-template-columns: 1fr; gap: 15px; } header { flex-direction: column; padding: 0.8rem 1rem; align-items: center; text-align: center; } header h1 { margin-bottom: 8px; font-size: 1.4rem; } header div { display: flex; gap: 10px; justify-content: center; } #welcome-text { font-size: 1em; } main { padding: 1.5rem; } .modal-content { padding: 25px 30px; } }

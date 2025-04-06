@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oda Prototipi v6</title>
+    <link rel="stylesheet" href="/OYUNLAR/tictactoe/lobby/test_odalar.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <h1>Tic-Tac-Toe Odaları (Prototip v6)</h1>
+        <div id="user-controls">
+            <span id="user-info-placeholder" style="color: #a0a0cc;">Yüklənir...</span>
+            <a href="javascript:history.back();" class="header-link">Geri Dön</a>
+        </div>
+        </header>
+    <main>
+        <p id="welcome-text">Hoş geldiniz! Lütfen oyuna katılmak için hazır odalardan birini seçin veya yeni bir oda oluşturun.</p>
+        <h2>Mevcut Odalar</h2>
+        <ul class="room-list" id="room-list-container">
+            <p id="info-message-area">Serverdən otaq siyahısı alınır...</p>
+        </ul>
+        <div class="center-button-container">
+             <button class="button create-button" id="create-room-button">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-plus-lg" viewBox="0 0 16 16">
+                     <path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/>
+                 </svg>
+                 Yeni Oda Oluştur
+             </button>
+        </div>
+    </main>
+
+    <div id="create-room-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" data-modal-id="create-room-modal">&times;</span>
+            <h3>Yeni Oda Oluştur</h3>
+            <div>
+                 <div class="input-group">
+                     <label for="new-room-name">Oda Adı</label>
+                     <input type="text" id="new-room-name" name="roomName" required maxlength="25" autocomplete="off" placeholder="Odanıza bir isim verin">
+                 </div>
+                 <div class="input-group">
+                     <label for="new-room-password">Parola (İsteğe bağlı, min 2 krk, 1 hərf + 1 rəqəm)</label> <input type="text" id="new-room-password" name="roomPassword" autocomplete="off" placeholder="Boş bırakılırsa herkese açık olur">
+                 </div>
+                  <div class="input-group">
+                      <label for="new-board-size">Taxta Boyutu</label>
+                      <select id="new-board-size" name="boardSize">
+                          <option value="3" selected>3x3</option>
+                          <option value="4">4x4</option>
+                          <option value="5">5x5</option>
+                          <option value="6">6x6</option>
+                      </select>
+                      <p id="new-room-rule-display" class="modal-rule-info"></p> </div>
+                 <button type="button" id="create-room-submit-btn" class="button primary">Oluştur</button>
+                 <p id="create-room-message" class="message"></p>
+             </div>
+          </div>
+      </div>
+
+    <div id="join-room-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" data-modal-id="join-room-modal">&times;</span>
+            <h3 id="join-room-title">Odaya Katıl</h3>
+            <div>
+                <input type="hidden" id="join-room-id"> <div class="input-group">
+                    <label for="join-room-password">Oda Parolası</label>
+                    <input type="password" id="join-room-password" required autocomplete="current-password"> </div>
+                 <button type="button" id="join-room-submit-btn" class="button primary">Katıl</button>
+                <p id="join-room-message" class="message"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/OYUNLAR/tictactoe/lobby/test_odalar.js"></script>
+    </body>
+</html>

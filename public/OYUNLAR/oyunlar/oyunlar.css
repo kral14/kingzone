@@ -1,0 +1,192 @@
+/* oyunlar.css - Oyunlar Səhifəsi Stilleri */
+
+/* Login.css-dən əsas dəyişənləri götürək */
+:root {
+    --primary-color: #4a90e2;
+    --background-color: #1a1a2e;
+    --card-background: #2a2a4e; /* Kart arxa fonu */
+    --card-hover-background: #3a3a6e; /* Kart hover arxa fonu */
+    --text-color: #e0e0ff;
+    --subtle-text: #a0a0cc;
+    --border-color: #4a4a8e;
+    --header-bg: linear-gradient(90deg, #6a11cb, #2575fc); /* Başlıq arxa fonu */
+    --card-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    --card-hover-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+    --icon-bg: rgba(255, 255, 255, 0.05); /* İkon arxa fonu */
+    --icon-border: rgba(255, 255, 255, 0.1);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Nunito', sans-serif;
+    background: linear-gradient(to bottom, #161625, var(--background-color));
+    color: var(--text-color);
+    min-height: 100vh;
+}
+
+/* Başlıq Stili */
+.page-header {
+    background: var(--header-bg);
+    color: white;
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.page-header h1 {
+    margin: 0;
+    font-size: 1.6rem;
+    font-weight: 700;
+    font-family: 'Orbitron', sans-serif;
+    text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+}
+#user-info {
+    font-size: 0.9rem;
+}
+#welcome-player {
+    font-weight: 600;
+    color: var(--text-color);
+}
+/* .logout-link { ... } (əgər əlavə etsəniz) */
+
+
+/* Əsas Konteyner */
+.games-container {
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 20px; /* Yan boşluqlar */
+}
+
+/* Oyun Kartları Grid */
+.games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* Responsiv grid */
+    gap: 30px; /* Kartlar arası boşluq */
+}
+
+/* Oyun Kartı Linki */
+.game-card-link {
+    text-decoration: none;
+    color: inherit;
+    display: block; /* Hover effektləri üçün */
+    transition: transform 0.3s ease;
+}
+
+.game-card-link:hover {
+    transform: translateY(-5px); /* Yüngül yuxarı qalxma */
+}
+
+/* Oyun Kartı */
+.game-card {
+    background-color: var(--card-background);
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    padding: 25px;
+    text-align: center;
+    box-shadow: var(--card-shadow);
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    height: 100%; /* Link içində kartın tam hündürlüyü tutması üçün */
+    display: flex;
+    flex-direction: column;
+    justify-content: center; /* İçəriyi vertikal mərkəzlə */
+    align-items: center; /* İçəriyi horizontal mərkəzlə */
+}
+
+.game-card:hover {
+    background-color: var(--card-hover-background);
+    box-shadow: var(--card-hover-shadow);
+}
+
+/* Oyun İkonu */
+.game-icon {
+    margin-bottom: 20px;
+    background-color: var(--icon-bg);
+    border: 1px solid var(--icon-border);
+    border-radius: 50%; /* Dairəvi ikon arxa fonu */
+    width: 100px; /* İkon ölçüsü */
+    height: 100px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.2);
+}
+
+.game-icon img {
+    max-width: 60%; /* Şəklin ikon qutusuna sığması */
+    max-height: 60%;
+    object-fit: contain;
+}
+/* Font Awesome ikonu üçün stil (əgər istifadə etsəniz) */
+/*
+.game-icon i {
+    font-size: 3rem;
+    color: var(--primary-color);
+}
+*/
+
+
+/* Oyun Başlığı */
+.game-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.4rem;
+    color: #fff;
+    margin-bottom: 10px;
+}
+
+/* Oyun Təsviri */
+.game-description {
+    font-size: 0.9rem;
+    color: var(--subtle-text);
+    line-height: 1.5;
+}
+
+/* Disabled Kart Stili (Gələcək üçün) */
+.game-card-link.disabled {
+    opacity: 0.6;
+    pointer-events: none; /* Klikləməni blokla */
+}
+.game-card-link.disabled:hover {
+    transform: none;
+}
+.game-card-link.disabled .game-card:hover {
+    background-color: var(--card-background);
+    box-shadow: var(--card-shadow);
+}
+
+
+/* Footer */
+.page-footer {
+    text-align: center;
+    margin-top: 50px;
+    padding: 20px;
+    color: var(--subtle-text);
+    font-size: 0.85rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Responsivlik */
+@media (max-width: 768px) {
+    .page-header h1 { font-size: 1.4rem; }
+    .games-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+    .game-card { padding: 20px; }
+    .game-icon { width: 80px; height: 80px; margin-bottom: 15px;}
+    .game-title { font-size: 1.2rem; }
+    .game-description { font-size: 0.85rem; }
+}
+
+@media (max-width: 480px) {
+    body { padding-bottom: 20px; }
+    .page-header { flex-direction: column; text-align: center; padding: 0.8rem 1rem;}
+    .page-header h1 { margin-bottom: 5px; font-size: 1.3rem;}
+    #user-info { margin-top: 5px; }
+    .games-container { margin: 20px auto; }
+    .games-grid { grid-template-columns: 1fr; gap: 20px; } /* Tək sütun */
+}

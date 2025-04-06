@@ -1,0 +1,196 @@
+/* dice.css - 3D Zar Stilleri, Modal ve Simvol Seçim Modalı (v6 - Üz mövqeləri düzəldildi) */
+
+:root {
+    /* Zar */
+    --dice-size: 110px;
+    --dot-size: calc(var(--dice-size) / 6.5);
+    --border-radius: calc(var(--dice-size) / 6);
+    --roll-duration: 2.0s;
+    --roll-timing-function: cubic-bezier(0.3, 0.9, 0.4, 1);
+
+    /* Rənglər */
+    --modal-bg: rgba(26, 26, 46, 0.95);
+    --modal-content-bg: #2a2a4e;
+    --modal-text-color: #e0e0ff;
+    --modal-border-color: #4a4a8e;
+    --success-color: #39ff14; /* Neon Yaşıl */
+    --modal-button-bg: var(--success-color);
+    --modal-button-text: #111;
+    --subtle-text: #a0a0cc;
+    --player-x-color: #00ffff; /* Cyan */
+    --player-o-color: #ff00ff; /* Magenta */
+    --primary-color: #4a90e2; /* Mavi */
+    --warning-color: #ffc107; /* Sarı */
+
+    /* Simvol Seçim */
+    --symbol-button-bg: rgba(74, 144, 226, 0.3);
+    --symbol-button-hover-bg: rgba(74, 144, 226, 0.5);
+    --symbol-button-border: var(--primary-color);
+}
+
+/* --- Zar Stilləri --- */
+.dice-modal .instructions {
+    font-size: 1em;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+    margin-bottom: 15px;
+    text-align: center;
+    max-width: 90%;
+    color: var(--modal-text-color); /* Varsayılan rəng */
+    min-height: 2.4em;
+    line-height: 1.2;
+    transition: color 0.3s ease, text-shadow 0.3s ease;
+}
+
+/* Rəqib qoşulduqda stil */
+.dice-modal .instructions.opponent-joined {
+    color: var(--success-color, #39ff14);
+    font-weight: bold;
+    text-shadow: 0 0 5px var(--success-color, #39ff14),
+                 1px 1px 2px rgba(0,0,0,0.7);
+    animation: glowPulse 1.5s infinite alternate ease-in-out;
+}
+
+/* Gözləmə vəziyyəti stili */
+.dice-modal .instructions.waiting {
+    color: var(--modal-text-color, #e0e0ff);
+    font-weight: normal;
+    animation: none;
+}
+
+/* Neon parıltı animasiyası */
+@keyframes glowPulse {
+    from {
+        text-shadow: 0 0 4px var(--success-color, #39ff14),
+                     1px 1px 2px rgba(0,0,0,0.7);
+        opacity: 0.9;
+    }
+    to {
+        text-shadow: 0 0 10px var(--success-color, #39ff14),
+                     0 0 15px rgba(57, 255, 20, 0.5),
+                     1px 1px 2px rgba(0,0,0,0.7);
+        opacity: 1;
+    }
+}
+
+.dice-modal .table-surface {
+    width: 100%; max-width: 280px; height: 200px;
+    perspective: 1200px; position: relative; display: flex;
+    justify-content: center; align-items: center;
+    background: radial-gradient(ellipse at center, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 60%);
+    margin: 0 auto;
+}
+.dice-modal .scene {
+    width: var(--dice-size); height: var(--dice-size); position: absolute;
+    filter: drop-shadow(0 8px 12px rgba(0,0,0,0.4));
+    transform-style: preserve-3d;
+    transition: transform 0.5s ease-out, opacity 0.5s ease-out;
+}
+.dice-modal .scene.scatter {
+    transform: scale(0.1) rotateZ(180deg) translateY(100px); opacity: 0;
+}
+
+.dice-modal .cube {
+    width: 100%; height: 100%; position: relative; transform-style: preserve-3d;
+    transform: translateZ(calc(var(--dice-size) / -2));
+    cursor: grab; /* Tutma imleci */
+}
+.dice-modal .cube:active {
+    cursor: grabbing; /* Tutarkən imlec */
+}
+
+.dice-modal .cube__face {
+    position: absolute; width: var(--dice-size); height: var(--dice-size);
+    background: linear-gradient(145deg, rgba(200, 60, 60, 0.95) 0%, rgba(150, 25, 25, 0.95) 100%);
+    border-radius: var(--border-radius); border: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: inset 0 0 calc(var(--dice-size) / 8) rgba(0,0,0,0.65),
+                inset 0.5px 0.5px 1px rgba(255, 255, 255, 0.3),
+                inset -0.5px -0.5px 1px rgba(255, 255, 255, 0.2),
+                0px 3px 8px rgba(0, 0, 0, 0.3);
+    display: grid; box-sizing: border-box; backface-visibility: hidden;
+    padding: calc(var(--dice-size) / 10);
+    overflow: hidden;
+    user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;
+}
+.dice-modal .cube__face::before { /* Parlama */
+    content: ''; position: absolute; top: -20%; left: -20%; width: 70%; height: 70%;
+    background: radial-gradient(ellipse at center, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 70%);
+    transform: rotate(45deg); opacity: 0.8; pointer-events: none;
+}
+.dice-modal .dot {
+    width: var(--dot-size); height: var(--dot-size); border-radius: 50%;
+    background-color: #f8f8f8; box-shadow: inset 1px 1px 4px rgba(0,0,0,0.7);
+    justify-self: center; align-self: center; border: 1px solid rgba(0,0,0,0.1);
+}
+
+/* Nokta Düzenleri (Dəyişməz) */
+.dice-modal .cube__face--1 { grid-template-areas: ". . ." ". a ." ". . ."; } .dice-modal .cube__face--1 .dot:nth-child(1) { grid-area: a; }
+.dice-modal .cube__face--2 { grid-template-areas: "a . ." ". . ." ". . b"; } .dice-modal .cube__face--2 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--2 .dot:nth-child(2) { grid-area: b; }
+.dice-modal .cube__face--3 { grid-template-areas: "a . ." ". b ." ". . c"; } .dice-modal .cube__face--3 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--3 .dot:nth-child(2) { grid-area: b; } .dice-modal .cube__face--3 .dot:nth-child(3) { grid-area: c; }
+.dice-modal .cube__face--4 { grid-template-areas: "a . b" ". . ." "c . d"; gap: calc(var(--dot-size) / 3); } .dice-modal .cube__face--4 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--4 .dot:nth-child(2) { grid-area: b; } .dice-modal .cube__face--4 .dot:nth-child(3) { grid-area: c; } .dice-modal .cube__face--4 .dot:nth-child(4) { grid-area: d; }
+.dice-modal .cube__face--5 { grid-template-areas: "a . b" ". e ." "c . d"; gap: calc(var(--dot-size) / 3); } .dice-modal .cube__face--5 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--5 .dot:nth-child(2) { grid-area: b; } .dice-modal .cube__face--5 .dot:nth-child(3) { grid-area: c; } .dice-modal .cube__face--5 .dot:nth-child(4) { grid-area: d; } .dice-modal .cube__face--5 .dot:nth-child(5) { grid-area: e; }
+.dice-modal .cube__face--6 { grid-template-areas: "a . d" "b . e" "c . f"; gap: calc(var(--dot-size) / 3); } .dice-modal .cube__face--6 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--6 .dot:nth-child(2) { grid-area: b; } .dice-modal .cube__face--6 .dot:nth-child(3) { grid-area: c; } .dice-modal .cube__face--6 .dot:nth-child(4) { grid-area: d; } .dice-modal .cube__face--6 .dot:nth-child(5) { grid-area: e; } .dice-modal .cube__face--6 .dot:nth-child(6) { grid-area: f; }
+
+/* Yüz Konumları (Orijinala qaytarıldı) */
+.dice-modal .cube__face--front  { transform: rotateY(  0deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 1 */
+.dice-modal .cube__face--back   { transform: rotateY(180deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 6 */
+.dice-modal .cube__face--right  { transform: rotateY( 90deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 3 (Sağda) */
+.dice-modal .cube__face--left   { transform: rotateY(-90deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 4 (Solda) */
+.dice-modal .cube__face--top    { transform: rotateX( 90deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 2 (Yuxarıda) */
+.dice-modal .cube__face--bottom { transform: rotateX(-90deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 5 (Aşağıda) */
+
+
+/* Zar Nəticə Sahələri (Dəyişməz) */
+.dice-modal .dice-results-area {
+    display: flex; justify-content: space-around; align-items: flex-start;
+    margin-top: 20px; margin-bottom: 15px; min-height: 4.5em; width: 100%;
+    padding: 10px 0;
+    border-top: 1px solid var(--modal-border-color);
+    border-bottom: 1px solid var(--modal-border-color);
+}
+.dice-modal .result-box {
+    text-align: center; font-size: 0.9em; color: var(--subtle-text); width: 45%;
+}
+.dice-modal .result-box .label {
+    display: block; margin-bottom: 5px; font-weight: 600;
+}
+.dice-modal .result-box .value {
+    display: block; font-size: 2.2em; font-weight: bold; line-height: 1;
+    color: var(--modal-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
+    min-height: 1em;
+}
+.dice-modal .result-box.winner .value {
+    color: var(--modal-button-bg); text-shadow: 0 0 8px var(--modal-button-bg);
+}
+.dice-modal .result-box.tie .value {
+    color: var(--warning-color); text-shadow: 0 0 6px var(--warning-color);
+}
+
+/* Zar At Düyməsi Stili (HTML-dən silindiyi üçün artıq lazım deyil) */
+/* .dice-modal #roll-dice-button { ... } */
+
+
+/* Zar Modalı Pəncərə Stilləri (Dəyişməz) */
+.modal#dice-roll-modal { display: none; position: fixed; z-index: 1055; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: var(--modal-bg); backdrop-filter: blur(5px); padding-top: 5vh; animation: modalBackdropFadeIn 0.3s ease-out; }
+.modal#dice-roll-modal .modal-content { background-color: var(--modal-content-bg); color: var(--modal-text-color); margin: 5% auto; padding: 25px 30px; border: 1px solid var(--modal-border-color); width: 90%; max-width: 450px; border-radius: 10px; position: relative; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); animation: modalContentSlideIn 0.3s ease-out; text-align: center; }
+.modal#dice-roll-modal .modal-body { padding-top: 15px; }
+.modal#dice-roll-modal .close-button {
+    color: var(--subtle-text); position: absolute; top: 10px; right: 15px; font-size: 28px; font-weight: bold; cursor: pointer; transition: color 0.2s ease, transform 0.2s ease; z-index: 10;
+}
+.modal#dice-roll-modal .close-button:hover, .modal#dice-roll-modal .close-button:focus { color: #fff; transform: scale(1.1); }
+
+
+/* ===== SİMVOL SEÇİM MODALI STİLLƏRİ ===== (Dəyişməz) */
+.modal#symbol-select-modal { display: none; position: fixed; z-index: 1060; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: var(--modal-bg); backdrop-filter: blur(8px); padding-top: 15vh; animation: modalBackdropFadeIn 0.4s ease-out; }
+.modal#symbol-select-modal .modal-content { background-color: var(--modal-content-bg); color: var(--modal-text-color); margin: auto; padding: 35px 40px; border: 1px solid var(--modal-border-color); width: 90%; max-width: 400px; border-radius: 10px; position: relative; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6); animation: modalContentSlideIn 0.4s ease-out; text-align: center; }
+.modal#symbol-select-modal h3 { margin-bottom: 20px; color: #fff; font-weight: 700; font-size: 1.5em; text-shadow: 0 0 6px var(--primary-color); }
+.modal#symbol-select-modal p { margin-bottom: 30px; color: var(--subtle-text); font-size: 1em; }
+.modal#symbol-select-modal .symbol-options { display: flex; justify-content: center; gap: 30px; }
+.modal#symbol-select-modal .symbol-button { background-color: var(--symbol-button-bg); border: 2px solid var(--symbol-button-border); color: var(--modal-text-color); width: 100px; height: 100px; border-radius: 50%; cursor: pointer; font-size: 3.5rem; font-weight: bold; font-family: 'Orbitron', sans-serif; display: flex; justify-content: center; align-items: center; transition: all 0.2s ease; }
+.modal#symbol-select-modal .symbol-button.symbol-x { color: var(--player-x-color); text-shadow: 0 0 10px var(--player-x-color); }
+.modal#symbol-select-modal .symbol-button.symbol-o { color: var(--player-o-color); text-shadow: 0 0 10px var(--player-o-color); }
+.modal#symbol-select-modal .symbol-button:hover { background-color: var(--symbol-button-hover-bg); transform: scale(1.1); box-shadow: 0 0 15px var(--symbol-button-border); }
+.modal#symbol-select-modal .waiting-message { font-style: italic; color: var(--subtle-text); margin-top: 20px; }
+
+/* Animasiyalar (Dəyişməz) */
+@keyframes modalBackdropFadeIn { from { background-color: rgba(26, 26, 46, 0); } to { background-color: var(--modal-bg); } }
+@keyframes modalContentSlideIn { from { opacity: 0; transform: translateY(-40px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }

@@ -1,6 +1,42 @@
-// Version 018 - 06.04.2025 (v36 - Otaq adı, Kick SNOW, Zər Oriyentasiya, 4x4 AI Depth=4 - TAM VERSİYA)
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("Oda İçi JS Başladı v36 (Otaq adı, Kick SNOW, Zər Oriyentasiya, 4x4 AI Depth=4 - TAM VERSİYA)");
+// public/OYUNLAR/tictactoe/game/oda_ici.js
+// Version: Socket.IO + Session Auth (Tam Kod)
+
+// ===== GİRİŞ YOXLAMASI (Session ilə) =====
+// DOMContentLoaded burada ayrıca yazırıq, çünki bu fayl özü yüklənəndə yoxlama etməlidir.
+document.addEventListener('DOMContentLoaded', async () => { // async etdik
+    let loggedInUser = null; // Giriş etmiş istifadəçi məlumatları
+
+    try {
+        const response = await fetch('/check-auth'); // Serverə yoxlama sorğusu
+        const data = await response.json();
+        if (!response.ok || !data.loggedIn) {
+            console.log("oda_ici.js: Giriş edilməyib (check-auth), login səhifəsinə yönləndirilir...");
+            // Yolun düzgün olduğundan əmin olun (oda_ici.html-dən login.html-ə)
+            window.location.href = '../../ANA SEHIFE/login/login.html';
+            return; // Scriptin qalanı işləməsin
+        }
+        // Giriş edilib, istifadəçi məlumatları data.user obyektindədir
+        loggedInUser = data.user;
+        console.log(`oda_ici.js: Giriş edilib: ${loggedInUser.nickname}`);
+
+        // Giriş uğurlu oldusa, oyunun qalanını başladan funksiyanı çağırırıq
+        initializeGame(loggedInUser);
+
+    } catch (error) {
+        console.error("oda_ici.js: Auth yoxlama xətası:", error);
+        window.location.href = '../../ANA SEHIFE/login/login.html'; // Xəta olarsa da girişə yönləndir
+        return;
+    }
+});
+// =======================================
+
+
+// ===== OYUNUN ƏSAS MƏNTİQİ (initializeGame funksiyası içində) =====
+function initializeGame(loggedInUserData) {
+    // loggedInUserData.nickname, loggedInUserData.id kimi məlumatları burada istifadə edə bilərsiniz
+
+    console.log("Oda İçi JS (Session Auth ilə) Başladı.");
+    console.log("Giriş etmiş istifadəçi (oyun üçün):", loggedInUserData);
 
     // ---- Element Referansları ----
     const gameLoadingOverlay = document.getElementById('game-loading-overlay');
@@ -965,4 +1001,4 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Oyunu Başlat ---
     initGame();
 
-}); // DOMContentLoaded Sonu
+}; // DOMContentLoaded Sonu

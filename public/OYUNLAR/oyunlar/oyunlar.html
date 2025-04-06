@@ -12,9 +12,12 @@
 <body>
     <header class="page-header">
         <h1>Oyun Seçin</h1>
-        <div id="user-info">
-             <span id="welcome-player">Xoş gəldin, Yüklənir...</span>
-             </div>
+        <div id="user-info" class="user-menu-container"> <span id="welcome-player">Xoş gəldin, Yüklənir...</span>
+            <div class="user-menu" id="user-menu-dropdown">
+                <button id="edit-profile-btn">Profili Düzənlə</button>
+                <button id="logout-btn">Çıxış</button>
+            </div>
+       </div>
     </header>
 
     <main class="games-container">
@@ -35,7 +38,39 @@
     <footer class="page-footer">
         <p>&copy; 2025 Oyun Platforması</p>
     </footer>
-
+    <div id="edit-profile-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-button" id="close-edit-modal">&times;</span>
+            <h3>Profili Düzənlə</h3>
+            <form id="edit-profile-form">
+                <input type="hidden" id="edit-current-nickname">
+                <div class="input-group">
+                    <label for="edit-fullName">Ad Soyad</label>
+                    <input type="text" id="edit-fullName" name="fullName" required>
+                </div>
+                <div class="input-group">
+                    <label for="edit-email">E-poçt Ünvanı</label>
+                    <input type="email" id="edit-email" name="email" required>
+                </div>
+                <div class="input-group">
+                    <label for="edit-nickname">Nickname (Oyun Adı)</label>
+                    <input type="text" id="edit-nickname" name="nickname" required>
+                </div>
+                <hr style="margin: 15px 0; border-color: var(--border-color);">
+                <p style="font-size: 0.8em; color: var(--subtle-text); margin-bottom: 10px;">Şifrəni dəyişmək istəmirsinizsə, bu sahələri boş buraxın.</p>
+                <div class="input-group">
+                    <label for="edit-password">Yeni Şifrə</label>
+                    <input type="password" id="edit-password" name="password" autocomplete="new-password">
+                </div>
+                <div class="input-group">
+                    <label for="edit-confirmPassword">Yeni Şifrə Təkrarı</label>
+                    <input type="password" id="edit-confirmPassword" name="confirmPassword" autocomplete="new-password">
+                </div>
+                <p id="edit-profile-message" class="message" style="color: #ff4d4d; background-color: rgba(255, 77, 77, 0.15); border: 1px solid rgba(255, 77, 77, 0.5); border-radius: 5px; padding: 8px 12px; margin-top: 15px; min-height: 1.3em;"></p>
+                <button type="submit" id="save-profile-button" class="button primary-button">Yadda Saxla</button>
+            </form>
+        </div>
+    </div>
     <script src="oyunlar.js"></script>
 </body>
 </html>

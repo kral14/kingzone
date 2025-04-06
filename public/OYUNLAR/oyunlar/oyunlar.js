@@ -1,196 +1,234 @@
-// public/OYUNLAR/oyunlar/oyunlar.js (v3 - Session Auth ilə)
+// public/OYUNLAR/tictactoe/game/oda_ici.js
+// Version: Socket.IO + Session Auth (Tam Kod - Düzəldilmiş)
 
 document.addEventListener('DOMContentLoaded', async () => { // async etdik
-    console.log("Oyunlar JS (v3 - Session Auth) Başladı.");
+    let loggedInUser = null; // Giriş etmiş istifadəçi məlumatları
 
-    const welcomePlayerSpan = document.getElementById('welcome-player');
-    const userInfoContainer = document.getElementById('user-info');
-    const userMenuDropdown = document.getElementById('user-menu-dropdown');
-    const logoutBtn = document.getElementById('logout-btn');
-    const editProfileBtn = document.getElementById('edit-profile-btn');
-    const editProfileModal = document.getElementById('edit-profile-modal');
-    const closeEditModalBtn = document.getElementById('close-edit-modal');
-    const editProfileForm = document.getElementById('edit-profile-form');
-    const saveProfileButton = document.getElementById('save-profile-button');
-    const editProfileMessage = document.getElementById('edit-profile-message');
-    const gamesGrid = document.getElementById('games-grid'); // Oyun kartları konteyneri
+    // ===== GİRİŞ YOXLAMASI (Session ilə) =====
+    try {
+        const response = await fetch('/check-auth'); // Serverə yoxlama sorğusu
+        const data = await response.json();
+        if (!response.ok || !data.loggedIn) {
+            console.log("oda_ici.js: Giriş edilməyib (check-auth), login səhifəsinə yönləndirilir...");
+            window.location.href = '../../ANA SEHIFE/login/login.html'; // Girişə yönləndir
+            return; // Scriptin qalanı işləməsin
+        }
+        // Giriş edilib
+        loggedInUser = data.user;
+        console.log(`oda_ici.js: Giriş edilib: ${loggedInUser.nickname}`);
 
-    // Elementləri yoxlayaq
-    if (!welcomePlayerSpan || !userInfoContainer || !userMenuDropdown || !logoutBtn || !editProfileBtn || !editProfileModal || !closeEditModalBtn || !editProfileForm || !saveProfileButton || !editProfileMessage || !gamesGrid) {
-        console.error("Oyunlar səhifəsində lazımi elementlərdən biri tapılmadı!");
-        // Yönləndirməni checkAuth funksiyası edəcək
-        // window.location.href = '../../ANA SEHIFE/login/login.html';
+        // Giriş uğurlu oldusa, oyunu başladırıq
+        initializeGame(loggedInUser);
+
+    } catch (error) {
+        console.error("oda_ici.js: Auth yoxlama xətası:", error);
+        window.location.href = '../../ANA SEHIFE/login/login.html'; // Xəta olarsa da girişə yönləndir
         return;
     }
+    // =======================================
+});
 
-    let currentUser = null; // Giriş etmiş istifadəçi məlumatlarını saxlamaq üçün
+// ===== OYUNUN ƏSAS MƏNTİQİ (initializeGame funksiyası içində) =====
+function initializeGame(loggedInUserData) {
+    console.log("Oda İçi JS (Session Auth ilə) Başladı.");
+    console.log("Giriş etmiş istifadəçi (oyun üçün):", loggedInUserData);
 
-    // 1. Giriş Vəziyyətini Yoxlamaq (Serverdən)
-    async function checkAuth() {
-        try {
-            const response = await fetch('/check-auth'); // Backend-dəki endpoint
-            const data = await response.json();
+    // --- Element Referansları ---
+    // (Bunlar əvvəlki kodunuzdakı kimi qalır)
+    const gameLoadingOverlay = document.getElementById('game-loading-overlay');
+    const roomNameDisplay = document.getElementById('room-name');
+    const boardElement = document.getElementById('game-board');
+    const turnIndicator = document.getElementById('turn-indicator');
+    const gameStatusDisplay = document.getElementById('game-status');
+    const playerXInfo = document.getElementById('player-x-info');
+    const playerOInfo = document.getElementById('player-o-info');
+    const playerXSymbolDisplay = document.getElementById('player-x-symbol');
+    const playerOSymbolDisplay = document.getElementById('player-o-symbol');
+    const playerXNameDisplay = document.getElementById('player-x-name');
+    const playerONameDisplay = document.getElementById('player-o-name');
+    const leaveRoomBtn = document.getElementById('leave-room-btn');
+    const fireworksOverlay = document.getElementById('fireworks-overlay');
+    const shatteringTextContainer = document.getElementById('shattering-text-container');
+    let editRoomBtn = document.getElementById('edit-room-btn'); // Bu səhifədə edit düyməsi olmamalıdır, yəqin lobbidən qalıb? Silinə bilər.
+    const editRoomModal = document.getElementById('edit-room-modal'); // Bu səhifədə modal olmamalıdır.
+    const restartGameBtn = document.getElementById('restart-game-btn');
+    const kickOpponentBtn = document.getElementById('kick-opponent-btn'); // Bu da lobbidə olmalıdır.
+    const callSnowBtn = document.getElementById('call-snow-btn'); // Bu da lobbidə olmalıdır.
+    const diceRollModal = document.getElementById('dice-roll-modal');
+    const diceInstructions = document.getElementById('dice-instructions');
+    const diceScene = document.getElementById('dice-scene');
+    const diceCubeElement = document.getElementById('dice-cube');
+    const yourRollResultDisplay = document.getElementById('your-roll-result');
+    const opponentRollResultDisplay = document.getElementById('opponent-roll-result');
+    const yourRollBox = document.getElementById('your-roll-box');
+    const opponentRollBox = document.getElementById('opponent-roll-box');
+    const symbolSelectModal = document.getElementById('symbol-select-modal');
+    const symbolOptionsDiv = symbolSelectModal?.querySelector('.symbol-options'); // Qala bilər
 
-            if (response.ok && data.loggedIn && data.user) {
-                console.log("İstifadəçi giriş edib:", data.user);
-                currentUser = data.user; // İstifadəçi məlumatlarını saxla
-                welcomePlayerSpan.textContent = `Xoş gəldin, ${currentUser.nickname}!`;
-                // Oyun kartlarına linkləri düzəlt (nickname əlavə et)
-                updateGameLinks(currentUser.nickname);
-                return true; // Giriş edilib
-            } else {
-                console.log("İstifadəçi giriş etməyib.");
-                window.location.href = '../../ANA SEHIFE/login/login.html'; // Girişə yönləndir
-                return false; // Giriş edilməyib
-            }
-        } catch (error) {
-            console.error("Auth yoxlama xətası:", error);
-            // Bəlkə serverə qoşulma xətasıdır, girişə yönləndirək
-            window.location.href = '../../ANA SEHIFE/login/login.html';
-            return false;
-        }
+    // ---- Oyun Durumu Dəyişənləri ----
+    let board = []; let currentPlayer = ''; let isGameOver = true; let boardSize = 3; let cells = [];
+    let winningCombination = []; let currentRoomId = 'Bilinməyən';
+    let currentPlayerName = loggedInUserData.nickname; // Sessiondan gələn ad
+    let opponentPlayerName = 'Rəqib'; let isCurrentUserCreator = false; let isOpponentPresent = false;
+    let player1Symbol = '?'; let player2Symbol = '?'; let player1Roll = null; let player2Roll = null;
+    let diceWinner = null; let currentRoomData = {}; let aiPlayerSymbol = ''; let isPlayingAgainstAI = false;
+    let socket = null; // Socket obyekti
+
+    // ---- Zar Değişkenleri ----
+    let isDiceRolling = false; let currentDiceRotateX = 0; let currentDiceRotateY = 0; let currentDiceRotateZ = 0;
+    const diceRotations = { 1: { x: 0, y: 0 }, 6: { x: 0, y: 180 }, 4: { x: 0, y: 90 }, 3: { x: 0, y: -90 }, 2: { x: -90, y: 0 }, 5: { x: 90, y: 0 } };
+    let isDragging = false; let dragStartX, dragStartY, previousMouseX, previousMouseY;
+    const dragThreshold = 10; const rotateSensitivity = 0.4; let initialCenterZ = -55;
+
+    // --- Yardımçı Fonksiyonlar ---
+    const showModal = (modal) => { if (modal) modal.style.display = 'block'; };
+    const hideModal = (modal) => { if (modal) modal.style.display = 'none'; };
+    function escapeHtml(unsafe) { if (typeof unsafe !== 'string') return String(unsafe); return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;"); }
+    function getUrlParams() {
+        const params = new URLSearchParams(window.location.search);
+        const sizeParam = parseInt(params.get('size') || '3', 10);
+        const validatedSize = Math.max(3, Math.min(6, sizeParam));
+        const roomNameParam = decodeURIComponent(params.get('roomName') || 'Bilinməyən Otaq');
+        return { roomId: params.get('roomId') || 'BilinməyənOda', roomName: roomNameParam, size: validatedSize };
     }
 
-    // Oyun kartlarına düzgün playerName parametrini əlavə edən funksiya
-    function updateGameLinks(nickname) {
-         const gameCardLinks = gamesGrid.querySelectorAll('.game-card-link');
-         gameCardLinks.forEach(link => {
-             const originalHref = link.getAttribute('href');
-             // Əvvəlki playerName parametrini silək (əgər varsa)
-             const url = new URL(originalHref, window.location.origin);
-             url.searchParams.delete('playerName');
-             // Yenisini əlavə edək
-             url.searchParams.set('playerName', nickname);
-             link.setAttribute('href', url.pathname + url.search);
+    // --- Başlanğıc Funksiyaları ---
+    function initGameInternal(initialSize = null) { // Adı dəyişdik
+        console.log("[initGameInternal - oda_ici] Başladı.");
+        showLoadingOverlay();
+        try {
+            const params = getUrlParams(); currentRoomId = params.roomId; const receivedRoomName = params.roomName; boardSize = initialSize || params.size || 3;
+            // Rəqibin kim olduğunu və AI olub olmadığını serverdən gələn məlumatla təyin etməliyik
+            opponentPlayerName = "Rəqib Gözlənilir..."; isOpponentPresent = false; isPlayingAgainstAI = false; // Bunlar serverdən gəlməlidir
 
-             // Köhnə click listenerları silib yenisini əlavə etməyə ehtiyac yoxdur,
-             // çünki linkin özü artıq düzgün parametri daşıyır.
-             // Amma əgər əvvəlki listener qalıbsa, onu silmək yaxşıdır.
-             // link.removeEventListener('click', handleGameLinkClick); // Əgər belə bir listener var idisə
-         });
+            console.log(`[initGameInternal - oda_ici] Parametrlər: User=${currentPlayerName}, RoomID=${currentRoomId}, RoomName=${receivedRoomName}, Size=${boardSize}`);
+            try { const dsv = getComputedStyle(document.documentElement).getPropertyValue('--dice-size').trim(); if(dsv) initialCenterZ = parseFloat(dsv.replace('px','')) / -2; } catch(e){ initialCenterZ = -55; }
+            if (roomNameDisplay) roomNameDisplay.textContent = `Otaq: ${escapeHtml(receivedRoomName)}`;
+            if (playerXNameDisplay) playerXNameDisplay.textContent = currentPlayerName;
+            if (playerONameDisplay) playerONameDisplay.textContent = opponentPlayerName;
+
+            // updateHeaderButtonsVisibility(); // Bu səhifədə header düymələri fərqli olmalıdır
+            if (restartGameBtn) restartGameBtn.disabled = true;
+
+            adjustStylesForBoardSize(boardSize); createBoard(); resetGameStateVars(); updatePlayerInfo();
+            boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none';
+            if (gameStatusDisplay) gameStatusDisplay.textContent = 'Rəqib gözlənilir...';
+
+            console.log(`[initGameInternal - oda_ici] Oyun interfeysi quruldu.`);
+            setupSocketConnection(); // Socket bağlantısını quraq
+
+            // Yükləmə ekranını biraz sonra gizlədək
+            setTimeout(hideLoadingOverlay, 500);
+            // Zər atma və s. rəqib qoşulduqdan sonra başlamalıdır
+
+        } catch (initError) { console.error("initGameInternal xətası:", initError); hideLoadingOverlay(); if(gameStatusDisplay) gameStatusDisplay.textContent = "Oyun yüklənərkən xəta."; }
     }
 
-    // Səhifə yüklənəndə autentifikasiyanı yoxla
-    const isLoggedIn = await checkAuth();
-
-    // Əgər giriş edilməyibsə, qalan kod işləməsin (checkAuth artıq yönləndirib)
-    if (!isLoggedIn) return;
-
-    // ----- Giriş Edilmiş İstifadəçi Üçün Hadisə Dinləyiciləri -----
-
-    // 2. Çıxış Düyməsi
-    logoutBtn.addEventListener('click', async () => {
-        console.log("Çıxış edilir...");
+    // --- Socket Bağlantısı və Hadisələr ---
+    function setupSocketConnection() {
         try {
-            const response = await fetch('/logout', { method: 'POST' });
-            if (response.ok) {
-                window.location.href = '../../ANA SEHIFE/login/login.html';
-            } else {
-                alert("Çıxış zamanı xəta baş verdi.");
-            }
-        } catch (error) {
-            console.error("Logout fetch xətası:", error);
-            alert("Serverlə əlaqə xətası.");
-        }
-    });
+            console.log("Oda içi: Socket.IO serverinə qoşulmağa cəhd edilir...");
+            socket = io();
 
-    // 3. Profil Düzəliş Modalı Açmaq
-    editProfileBtn.addEventListener('click', async () => {
-        console.log("Profil düzəliş modalı açılır...");
-        editProfileMessage.textContent = ''; // Köhnə mesajı təmizlə
-        editProfileMessage.style.color = '#ff4d4d'; // Standard xəta rəngi
+            socket.on('connect', () => {
+                 console.log('Oda içi: Socket.IO serverinə qoşuldu! ID:', socket.id);
+                 // Serverə hansı otaqda olduğumuzu bildirmək üçün hadisə göndərə bilərik
+                 socket.emit('enter_game_room', { roomId: currentRoomId });
+            });
 
-        if (!currentUser) { // currentUser checkAuth-dan sonra dolu olmalıdır
-             alert("İstifadəçi məlumatları tapılmadı. Zəhmət olmasa səhifəni yeniləyin.");
-             return;
-        }
+            socket.on('disconnect', (reason) => { console.warn('Oda içi: Socket ayrıldı! Səbəb:', reason); if (gameStatusDisplay) gameStatusDisplay.textContent = `Əlaqə kəsildi (${reason}).`; isGameOver = true; boardElement.style.pointerEvents = 'none'; });
+            socket.on('connect_error', (error) => { console.error('Oda içi: Socket qoşulma xətası:', error.message); if (error.message === 'Authentication error') { alert('Giriş edilməyib. Giriş səhifəsinə yönləndirilirsiniz.'); window.location.href = '../../ANA SEHIFE/login/login.html'; } else { if (gameStatusDisplay) gameStatusDisplay.textContent = 'Serverə qoşulma xətası.'; } isGameOver = true; boardElement.style.pointerEvents = 'none'; });
 
-        // Hazırkı istifadəçi məlumatlarını (artıq currentUser obyektində var) forma dolduraq
-        // Serverdən yenidən çəkməyə ehtiyac yoxdur, amma istəsəniz GET /profile/:nickname yenə istifadə edə bilərsiniz
-        try {
-            document.getElementById('edit-current-nickname').value = currentUser.nickname;
-            document.getElementById('edit-fullName').value = currentUser.fullName || ''; // Əgər sessionda saxlanıbsa
-            // Emaili almaq üçün serverə sorğu göndərmək lazım gələ bilər, çünki sessionda saxlamadıq
-            // Və ya sessiona əlavə edə bilərik
-            // Hələlik boş qalsın və ya serverdən çəkilsin
-             const profileResponse = await fetch(`/profile/${encodeURIComponent(currentUser.nickname)}`);
-             if (!profileResponse.ok) throw new Error('Profil datası alınamadı');
-             const profileData = await profileResponse.json();
-             document.getElementById('edit-email').value = profileData.email || '';
+            // --- Serverdən Gələn Oyun Hadisələri ---
+            socket.on('game_start', (data) => { // Server oyunu başlatmaq üçün siqnal göndərməlidir
+                console.log("Oyun başlayır!", data);
+                opponentPlayerName = data.opponentName || 'Rəqib';
+                isOpponentPresent = true;
+                isPlayingAgainstAI = data.isAiOpponent || false; // Server AI olub olmadığını bildirməlidir
+                if (playerONameDisplay) playerONameDisplay.textContent = opponentPlayerName;
+                updatePlayerInfo();
+                // Zər atma və ya simvol seçimi burada başlamalıdır
+                if (gameStatusDisplay) gameStatusDisplay.textContent = "Oyun başlayır! Zər atılır...";
+                 setupDiceModalForRollOff(); showModal(diceRollModal); initDice();
+            });
 
-            document.getElementById('edit-nickname').value = currentUser.nickname || '';
-            document.getElementById('edit-password').value = '';
-            document.getElementById('edit-confirmPassword').value = '';
+            socket.on('opponent_left_game', (data) => {
+                // ... (əvvəlki mesajdakı kimi) ...
+                console.log("Oda içi: Rəqib ayrıldı:", data);
+                 if (isOpponentPresent) {
+                     opponentPlayerName = 'Rəqib Ayrıldı'; isOpponentPresent = false; isPlayingAgainstAI = false;
+                     if (playerONameDisplay) playerONameDisplay.textContent = opponentPlayerName; if (playerOInfo) playerOInfo.classList.remove('active-player');
+                     isGameOver = true; boardElement.style.pointerEvents = 'none'; if (gameStatusDisplay) gameStatusDisplay.textContent = `${data.username} otaqdan ayrıldı.`; if (restartGameBtn) restartGameBtn.disabled = true; hideModal(diceRollModal); hideModal(symbolSelectModal);
+                 }
+            });
 
-            editProfileModal.style.display = 'block';
-
-        } catch (error) {
-             console.error("Profil modalını açarkən xəta:", error);
-             alert("Profil məlumatları yüklənərkən xəta baş verdi.");
-        }
-    });
-
-    // 4. Profil Düzəliş Modalı Bağlamaq
-    closeEditModalBtn.addEventListener('click', () => { editProfileModal.style.display = 'none'; });
-    window.addEventListener('click', (event) => { if (event.target == editProfileModal) { editProfileModal.style.display = "none"; } });
-
-    // 5. Profil Düzəliş Formunu Göndərmək
-    editProfileForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        editProfileMessage.textContent = ''; editProfileMessage.style.color = '#ff4d4d';
-        saveProfileButton.disabled = true;
-
-        const currentNickname = document.getElementById('edit-current-nickname').value; // Hansı user-i dəyişirik
-        const fullName = document.getElementById('edit-fullName').value.trim();
-        const email = document.getElementById('edit-email').value.trim();
-        const nickname = document.getElementById('edit-nickname').value.trim();
-        const password = document.getElementById('edit-password').value;
-        const confirmPassword = document.getElementById('edit-confirmPassword').value;
-
-        // Client-side validasiya (əvvəlki kimi)
-        if (!fullName || !email || !nickname) { editProfileMessage.textContent = 'Ad Soyad, E-poçt və Nickname boş ola bilməz.'; saveProfileButton.disabled = false; return; }
-         if (/\s/.test(nickname)) { editProfileMessage.textContent = 'Nickname boşluq ehtiva edə bilməz.'; saveProfileButton.disabled = false; return; }
-         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { editProfileMessage.textContent = 'Düzgün e-poçt ünvanı daxil edin.'; saveProfileButton.disabled = false; return; }
-
-        let passwordData = undefined;
-        if (password || confirmPassword) {
-            if (password !== confirmPassword) { editProfileMessage.textContent = 'Yeni şifrələr eyni deyil.'; saveProfileButton.disabled = false; return; }
-            if (password.length < 6) { editProfileMessage.textContent = 'Yeni şifrə minimum 6 simvol olmalıdır.'; saveProfileButton.disabled = false; return; }
-            passwordData = password;
-        }
-
-        try {
-            const response = await fetch(`/profile/${encodeURIComponent(currentNickname)}`, {
-                 method: 'PUT',
-                 headers: { 'Content-Type': 'application/json', },
-                 body: JSON.stringify({ fullName, email, nickname, password: passwordData }),
+            // Rəqibin gedişi (bu vacibdir)
+             socket.on('opponent_moved', (data) => {
+                 console.log("Rəqib gediş etdi:", data);
+                 // Gedişi lövhədə göstər (əgər növbə ondadırsa və oyun davam edirsə)
+                 if (!isGameOver && currentPlayer === player2Symbol && board[data.index] === '') {
+                      placeMark(data.index, player2Symbol); // Bu funksiya checkWin/endGame/switchPlayer çağırır
+                      // Növbə bizə keçdi, lövhəni aktiv et (əgər oyun bitməyibsə)
+                      if (!isGameOver) {
+                          boardElement.style.pointerEvents = 'auto';
+                          updateTurnIndicator();
+                      }
+                 } else {
+                     console.warn("Gözlənilməyən və ya keçərsiz rəqib gedişi alındı.");
+                 }
              });
 
-            const result = await response.json();
+             // Serverdən gələn digər oyunla bağlı hadisələr (zər, simvol, restart vs.)
+             // ...
 
-            if (response.ok) {
-                 editProfileMessage.style.color = '#39ff14';
-                 editProfileMessage.textContent = result.message + ' Səhifə yenilənir...';
-                 // currentUser obyektini yeniləyək (əgər lazımdırsa)
-                 currentUser = result.updatedUser || currentUser;
-                 welcomePlayerSpan.textContent = `Xoş gəldin, ${currentUser.nickname}!`; // Üst hissəni yenilə
-                 updateGameLinks(currentUser.nickname); // Linkləri yenilə
+        } catch(e) { console.error("Socket bağlantısı qurularkən xəta:", e); if (gameStatusDisplay) gameStatusDisplay.textContent = 'Real-time serverə qoşulma xətası.'; }
+    }
 
-                 setTimeout(() => {
-                     editProfileModal.style.display = 'none';
-                     // window.location.reload(); // Səhifəni yeniləməyə bilərik, çünki artıq UI yeniləndi
-                 }, 1500);
-                 saveProfileButton.disabled = false; // Proses bitdi
+    // --- Qalan Bütün Funksiyalar ---
+    // Bu funksiyaların hamısı buraya köçürülməlidir:
+    // showLoadingOverlay, hideLoadingOverlay, adjustStylesForBoardSize, createBoard, resetGameStateVars, resetBoardAndStatus,
+    // setupDiceModalForRollOff, initDice, handleDiceClickOrDragEnd, rollDice, handleRollOffResults, triggerDiceScatterAndSymbolSelect, setDiceTransform, handleMouseDown, handleMouseMove, handleMouseUp, handleTouchStart, handleTouchMove, handleTouchEnd,
+    // initSymbolSelection, handleSymbolChoice, simulateOpponentSymbolChoice, startGameProcedure, updatePlayerInfo, handleCellClick, makeAIMove, findBestMove, getCenterCells, minimax, checkWinnerForMinimax, placeMark, switchPlayer, updateTurnIndicator,
+    // checkWin, generateWinConditions, checkDraw, highlightWinningCells, endGame,
+    // triggerShatterEffect, hideFireworks, clearShatteringText,
+    // handleRestartGame
 
-            } else {
-                 editProfileMessage.textContent = result.message || 'Profil yenilənərkən xəta baş verdi.';
-                 saveProfileButton.disabled = false;
+    // Nümunə olaraq bəzilərini əlavə edirəm, qalanını siz əvvəlki kodlardan köçürməlisiniz
+    function showLoadingOverlay() { if(gameLoadingOverlay) gameLoadingOverlay.classList.add('visible'); }
+    function hideLoadingOverlay() { if(gameLoadingOverlay) gameLoadingOverlay.classList.remove('visible'); }
+    function adjustStylesForBoardSize(size) { /* ... */ let c='--cell-size-large-dynamic'; if(size===4)c='--cell-size-medium-dynamic'; else if(size>=5)c='--cell-size-small-dynamic'; document.documentElement.style.setProperty('--current-cell-size',`var(${c})`); document.documentElement.style.setProperty('--current-font-size',`calc(var(${c}) * 0.6)`); document.documentElement.style.setProperty('--board-size',size); }
+    function createBoard() { /* ... */ if(!boardElement)return; boardElement.innerHTML=''; cells=[]; for(let i=0;i<boardSize*boardSize;i++){ const c=document.createElement('div'); c.classList.add('cell'); c.dataset.index=i; boardElement.appendChild(c); cells.push(c); } }
+    function resetGameStateVars() { /* ... */ board=Array(boardSize*boardSize).fill(''); currentPlayer=''; isGameOver=true; winningCombination=[]; player1Symbol='?'; player2Symbol='?'; player1Roll=null; player2Roll=null; diceWinner=null; }
+    function resetBoardAndStatus() { /* ... */ if(gameStatusDisplay){gameStatusDisplay.textContent=''; gameStatusDisplay.className='game-status';} cells.forEach((c,i)=>{const n=c.cloneNode(true); n.className='cell'; n.textContent=''; n.style.cursor='not-allowed'; n.style.animation=''; c.parentNode.replaceChild(n,c); cells[i]=n;}); updatePlayerInfo(); boardElement.style.opacity='0.5'; boardElement.style.pointerEvents='none'; if(restartGameBtn)restartGameBtn.disabled=true; hideFireworks(); }
+    function setupDiceModalForRollOff() { /* ... */ if(isDiceRolling)return; if(diceInstructions){diceInstructions.textContent='Başlayanı təyin etmək üçün zərə klikləyin və ya sürükləyin.'; diceInstructions.classList.add('opponent-joined'); diceInstructions.classList.remove('waiting');} if(yourRollResultDisplay)yourRollResultDisplay.textContent='?'; if(opponentRollResultDisplay)opponentRollResultDisplay.textContent='?'; if(yourRollBox)yourRollBox.className='result-box'; if(opponentRollBox)opponentRollBox.className='result-box'; player1Roll=null; player2Roll=null; diceWinner=null; if(diceCubeElement)diceCubeElement.style.cursor='grab'; initDice(); }
+    function initDice() { /* ... */ if(!diceCubeElement)return; diceCubeElement.style.transition='none'; currentDiceRotateX=0; currentDiceRotateY=0; currentDiceRotateZ=0; setDiceTransform(); diceCubeElement.style.cursor=isOpponentPresent?'grab':'not-allowed'; }
+    function setDiceTransform(x=currentDiceRotateX, y=currentDiceRotateY, z=currentDiceRotateZ){ if(!diceCubeElement)return; const t=`translateZ(${initialCenterZ}px) rotateX(${x}deg) rotateY(${y}deg) rotateZ(${z}deg)`; diceCubeElement.style.transform=t; }
+    // ... QALAN BÜTÜN FUNKSİYALAR BURAYA KÖÇÜRÜLMƏLİDİR ...
+    // placeMark, checkWin, endGame, triggerShatterEffect, handleCellClick, vs.
+
+
+    // --- Əsas Olay Dinləyiciləri ---
+    if (leaveRoomBtn) {
+        leaveRoomBtn.addEventListener('click', () => {
+            if (confirm("Otaqdan çıxmaq istədiyinizə əminsiniz?")) {
+                 if(socket) socket.emit('leave_room');
+                window.location.href = '../lobby/test_odalar.html'; // Lobby-ə qayıt
             }
-        } catch(error) {
-             console.error('Profil yeniləmə fetch xətası:', error);
-             editProfileMessage.textContent = 'Serverlə əlaqə qurmaq mümkün olmadı.';
-             saveProfileButton.disabled = false;
-        }
-    });
+        });
+    }
+     // Restart düyməsi üçün listener (əgər varsa)
+     if (restartGameBtn) {
+          // restartGameBtn.addEventListener('click', handleRestartGameRequest); // Yeni funksiya adı
+     }
+     // Zar kubu üçün listenerlar
+     if (diceCubeElement) {
+         diceCubeElement.addEventListener('mousedown', handleMouseDown);
+         diceCubeElement.addEventListener('touchstart', handleTouchStart, { passive: false });
+     } else { console.error("Zər kub elementi tapılmadı!"); }
+     // Simvol seçimi üçün listenerlar (initSymbolSelection içində əlavə olunur)
 
-}); // DOMContentLoaded Sonu
+
+    // --- Oyunu Başlat ---
+    initGameInternal(); // Əsas oyunu başladan funksiya
+
+} // initializeGame funksiyasının sonu

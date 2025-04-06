@@ -1,68 +1,152 @@
-// server/server.js
+// server/server.js (v3 - /register və /login məntiqi ilə)
 
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const bcrypt = require('bcrypt'); // Şifrə hash üçün
+const saltRounds = 10; // Hash üçün təhlükəsizlik dərəcəsi
 
 const app = express();
 const server = http.createServer(app);
-// Socket.IO-nu CORS problemlərinin qarşısını almaq üçün konfiqurasiya edirik
-// Render kimi platformalarda bu lazım ola bilər
 const io = socketIo(server, {
-    cors: {
-        origin: "*", // Daha təhlükəsiz variant üçün Render app URL-nizi yaza bilərsiniz
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-const PORT = process.env.PORT || 3000; // Render portu avtomatik təyin edəcək
+app.use(express.json()); // Gələn JSON request body-lərini parse etmək üçün middleware
 
-// Statik faylları (HTML, CSS, Client JS) public qovluğundan təqdim etmək üçün
-// __dirname server.js faylının olduğu qovluqdur (yəni /server qovluğu)
-// Bizə isə /public qovluğu lazımdır, ona görə bir qovluq yuxarı çıxıb public-ə giririk
+const PORT = process.env.PORT || 3000;
+
+// Statik faylları public qovluğundan təqdim etmək
 const publicDirectoryPath = path.join(__dirname, '../public');
 app.use(express.static(publicDirectoryPath));
-// Default route to redirect to login page
-app.get('/', (req, res) => {
-    // Redirect to the login page relative to the root
-    res.redirect('/ANA SEHIFE/login/login.html');
-});
-// ----- Oyun Məntiqi və Otaq İdarəetməsi (Sadələşdirilmiş) -----
 
-let rooms = {}; // Otaqları yadda saxlamaq üçün obyekt (server restart olanda silinir)
-let users = {}; // Qoşulmuş istifadəçiləri saxlamaq üçün
+// ----- Sadə In-Memory Verilənlər Bazası (Müvəqqəti) -----
+let users_db = []; // İstifadəçiləri saxlayacaq massiv (server restartda silinir)
+let rooms = {};    // Otaqlar
+let users = {};    // Socket bağlantıları
 
-function generateRoomId() {
-    return Math.random().toString(36).substring(2, 9); // Sadə unikal ID
-}
+// ----- Yardımçı Funksiyalar -----
+function generateRoomId() { return Math.random().toString(36).substring(2, 9); }
 
-// Otaq siyahısını bütün istifadəçilərə göndərən funksiya
 function broadcastRoomList() {
     const roomListForClients = Object.values(rooms).map(room => ({
-        id: room.id,
-        name: room.name,
-        playerCount: room.players.length,
-        hasPassword: !!room.password, // Şifrə varsa true, yoxsa false
-        boardSize: room.boardSize,
-        creatorUsername: room.creatorUsername,
+        id: room.id, name: room.name, playerCount: room.players.length, hasPassword: !!room.password,
+        boardSize: room.boardSize, creatorUsername: room.creatorUsername,
         player1Username: room.players[0] ? users[room.players[0]]?.username : null,
         player2Username: room.players[1] ? users[room.players[1]]?.username : null,
     }));
-    // === DÜZƏLİŞ ===
-    console.log('>>> Broadcasting room_list_update with:', JSON.stringify(roomListForClients)); // GÖNDƏRİLƏN DATA
-    // =============
+    console.log('>>> Broadcasting room_list_update with:', JSON.stringify(roomListForClients));
     io.emit('room_list_update', roomListForClients);
 }
 
+// ----- HTTP API Marşrutları (Routes) -----
+
+// Qeydiyyat Endpoint-i (/register)
+app.post('/register', async (req, res) => {
+    console.log('POST /register sorğusu alındı:', req.body);
+    const { fullName, email, nickname, password } = req.body;
+
+    // 1. Validasiya
+    if (!fullName || !email || !nickname || !password) {
+        return res.status(400).json({ message: 'Bütün sahələr doldurulmalıdır.' });
+    }
+    if (password.length < 6) {
+        return res.status(400).json({ message: 'Şifrə minimum 6 simvol olmalıdır.' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+         return res.status(400).json({ message: 'Düzgün e-poçt ünvanı daxil edin.' });
+    }
+    // Nickname üçün əlavə yoxlama (məs. boşluq olmasın)
+    if (/\s/.test(nickname)) {
+         return res.status(400).json({ message: 'Nickname boşluq ehtiva edə bilməz.' });
+    }
+
+
+    try {
+        // 2. Unikallıq Yoxlaması (email və nickname)
+        const emailExists = users_db.some(user => user.email === email);
+        if (emailExists) {
+            return res.status(409).json({ message: 'Bu e-poçt ünvanı artıq qeydiyyatdan keçib.' }); // 409 Conflict
+        }
+        const nicknameExists = users_db.some(user => user.nickname.toLowerCase() === nickname.toLowerCase()); // Kiçik/böyük hərf fərqi olmadan yoxla
+        if (nicknameExists) {
+            return res.status(409).json({ message: 'Bu nickname (oyun adı) artıq istifadə olunur.' }); // 409 Conflict
+        }
+
+        // 3. Şifrə Hash Etmə
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+        // 4. Yeni İstifadəçini Yadda Saxlama (In-Memory)
+        const newUser = {
+            id: Date.now().toString(),
+            fullName: fullName,
+            email: email,
+            nickname: nickname, // Orijinal daxil edilən halı saxlayaq
+            password: hashedPassword
+        };
+        users_db.push(newUser);
+        console.log('Yeni istifadəçi qeydiyyatdan keçdi:', { id: newUser.id, nickname: newUser.nickname, email: newUser.email });
+        console.log('Hazırkı istifadəçi bazası (in-memory):', users_db.map(u => ({id: u.id, nickname: u.nickname}))); // Şifrəni loga yazdırma
+
+        // 5. Uğur Cavabı Göndərmək
+        res.status(201).json({ message: 'Qeydiyyat uğurlu oldu!' }); // 201 Created
+
+    } catch (error) {
+        console.error("Qeydiyyat zamanı xəta:", error);
+        res.status(500).json({ message: 'Server xətası baş verdi. Zəhmət olmasa, sonra yenidən cəhd edin.' });
+    }
+});
+
+// Giriş Endpoint-i (/login)
+app.post('/login', async (req, res) => {
+    console.log('POST /login sorğusu alındı:', req.body);
+    const { nickname, password } = req.body;
+
+    // 1. Validasiya
+    if (!nickname || !password) {
+        return res.status(400).json({ message: 'Nickname və şifrə daxil edilməlidir.' });
+    }
+
+    try {
+        // 2. İstifadəçini Tapmaq (nickname ilə, kiçik/böyük hərf fərqi olmadan)
+        const user = users_db.find(u => u.nickname.toLowerCase() === nickname.toLowerCase());
+
+        if (!user) {
+            // İstifadəçi tapılmadı
+            return res.status(401).json({ message: 'Nickname və ya şifrə yanlışdır.' }); // 401 Unauthorized
+        }
+
+        // 3. Şifrə Müqayisəsi
+        const isPasswordCorrect = await bcrypt.compare(password, user.password); // Daxil edilən şifrə ilə hash-ı müqayisə et
+
+        if (!isPasswordCorrect) {
+            // Şifrə yanlışdır
+            return res.status(401).json({ message: 'Nickname və ya şifrə yanlışdır.' }); // 401 Unauthorized
+        }
+
+        // 4. Uğurlu Giriş Cavabı
+        // TODO: Burada session və ya JWT token yaratmaq və clientə göndərmək lazımdır
+        // Hələlik sadəcə uğurlu cavab və nickname qaytaraq
+        console.log(`İstifadəçi giriş etdi: ${user.nickname}`);
+        res.status(200).json({ message: 'Giriş uğurlu!', nickname: user.nickname }); // Nickname-i qaytarırıq ki, frontend yönləndirə bilsin
+
+    } catch (error) {
+        console.error("Giriş zamanı xəta:", error);
+        res.status(500).json({ message: 'Server xətası baş verdi. Zəhmət olmasa, sonra yenidən cəhd edin.' });
+    }
+});
+
+// Default route to redirect to login page
+app.get('/', (req, res) => {
+    res.redirect('/ANA SEHIFE/login/login.html');
+});
 
 // ----- Socket.IO Hadisələri -----
-
 io.on('connection', (socket) => {
     console.log(`Yeni istifadəçi qoşuldu: ${socket.id}`);
-    users[socket.id] = { id: socket.id, username: 'Anonim', currentRoom: null };
+    users[socket.id] = { id: socket.id, username: 'Anonim', currentRoom: null }; // username burda nickname olmalıdır (girişdən sonra)
 
-    // İstifadəçi qoşulduqda otaq siyahısını ona göndər
     socket.emit('room_list_update', Object.values(rooms).map(room => ({
          id: room.id, name: room.name, playerCount: room.players.length, hasPassword: !!room.password,
          boardSize: room.boardSize, creatorUsername: room.creatorUsername,
@@ -70,164 +154,59 @@ io.on('connection', (socket) => {
          player2Username: room.players[1] ? users[room.players[1]]?.username : null,
     })));
 
-
-    // İstifadəçi adını qeydiyyatdan keçir
+    // Qeyd: register_user hadisəsi əslində login mexanizmi ilə əvəz olunmalıdır
     socket.on('register_user', (username) => {
+        // Bu kod, istifadəçi /login ilə giriş etdikdən sonra işləməlidir ki,
+        // socket bağlantısı ilə düzgün nickname əlaqələndirilsin.
+        // Hələlik sadə qalsın:
         if (username && username.trim().length > 0) {
-            users[socket.id].username = username.trim();
-            console.log(`İstifadəçi ${socket.id} adını ${username.trim()} olaraq təyin etdi.`);
+            users[socket.id].username = username.trim(); // Bu nickname olmalıdır
+            console.log(`Socket ${socket.id} üçün username təyin edildi: ${username.trim()}`);
         }
     });
 
-    // Yeni otaq yaratma
+    // Otaq yaratma/qoşulma və digər Socket.IO hadisələri dəyişməz qala bilər
+    // Ancaq idealda, bu hadisələri etməzdən əvvəl istifadəçinin giriş edib etmədiyini yoxlamaq lazımdır.
     socket.on('create_room', (data) => {
         console.log('create_room hadisəsi alındı:', data);
-        if (!data || !data.name || data.name.trim().length === 0) {
-            return socket.emit('creation_error', 'Otaq adı boş ola bilməz.');
-        }
-        // Şifrə validasiyası (əgər varsa) - client tərəfindəki ilə eyni olmalıdır
-        if (data.password && data.password.length > 0) {
-             if (data.password.length < 2 || !(/[a-zA-Z]/.test(data.password) && /\d/.test(data.password))) {
-                   return socket.emit('creation_error', 'Şifrə tələblərə uyğun deyil (min 2 krk, 1 hərf + 1 rəqəm).');
-             }
-         }
+        if (!data || !data.name || data.name.trim().length === 0) { return socket.emit('creation_error', 'Otaq adı boş ola bilməz.'); }
+        if (data.password && data.password.length > 0) { if (data.password.length < 2 || !(/[a-zA-Z]/.test(data.password) && /\d/.test(data.password))) { return socket.emit('creation_error', 'Şifrə tələblərə uyğun deyil.'); } }
 
         const newRoomId = generateRoomId();
-        const newRoom = {
-            id: newRoomId,
-            name: data.name.trim(),
-            password: data.password || null, // Şifrə varsa saxla, yoxsa null
-            players: [socket.id], // Yaradan avtomatik qoşulur
-            boardSize: parseInt(data.boardSize, 10) || 3,
-            creatorUsername: users[socket.id].username,
-            // Oyun vəziyyəti üçün yer (əlavə olunmalıdır)
-            gameState: null // Məsələn: lövhə, növbə kimdədir və s.
-        };
+        const creatorUsername = users[socket.id]?.username || 'Naməlum Yaradan';
+        const newRoom = { id: newRoomId, name: data.name.trim(), password: data.password || null, players: [socket.id], boardSize: parseInt(data.boardSize, 10) || 3, creatorUsername: creatorUsername, gameState: null };
         rooms[newRoomId] = newRoom;
         users[socket.id].currentRoom = newRoomId;
-        socket.join(newRoomId); // Socket.IO otağına qoşul
-
+        socket.join(newRoomId);
         console.log(`Otaq yaradıldı: ID=${newRoomId}, Adı=${newRoom.name}`);
-
-        // socket.emit('room_created', { roomId: newRoomId, roomName: newRoom.name }); // Klientə təsdiq göndər
-        // Avtomatik qoşulma üçün client tərəfindəki kimi yönləndirmə məlumatı göndərək
-        socket.emit('room_joined', {
-             roomId: newRoomId,
-             roomName: newRoom.name,
-             boardSize: newRoom.boardSize,
-             // Gələcəkdə: playerSymbol: 'X' // Yaradana avtomatik X verək?
-        });
-
-        broadcastRoomList(); // Bütün istifadəçilərə yeni siyahını göndər
+        socket.emit('room_joined', { roomId: newRoomId, roomName: newRoom.name, boardSize: newRoom.boardSize });
+        broadcastRoomList();
     });
 
-    // Otağa qoşulma
     socket.on('join_room', (data) => {
         console.log('join_room hadisəsi alındı:', data);
-        const room = rooms[data.roomId];
-        const user = users[socket.id];
+        const room = rooms[data.roomId]; const user = users[socket.id];
+        if (!room) { return socket.emit('join_error', 'Otaq tapılmadı.'); } if (user.currentRoom) { return socket.emit('join_error', 'Siz artıq başqa bir otaqdasınız.'); } if (room.players.length >= 2) { return socket.emit('join_error', 'Otaq doludur.'); } if (room.password && room.password !== data.password) { return socket.emit('join_error', 'Şifrə yanlışdır.'); }
 
-        if (!room) { return socket.emit('join_error', 'Otaq tapılmadı.'); }
-        if (user.currentRoom) { return socket.emit('join_error', 'Siz artıq başqa bir otaqdasınız.'); }
-        if (room.players.length >= 2) { return socket.emit('join_error', 'Otaq doludur.'); }
-        if (room.password && room.password !== data.password) { return socket.emit('join_error', 'Şifrə yanlışdır.'); }
-
-        // Qoşulma uğurludur
-        room.players.push(socket.id);
-        user.currentRoom = room.id;
-        socket.join(room.id);
-
+        room.players.push(socket.id); user.currentRoom = room.id; socket.join(room.id);
         console.log(`İstifadəçi ${user.username} (${socket.id}) otağa qoşuldu: ${room.name} (${room.id})`);
-
-        // Qoşulan istifadəçiyə təsdiq və yönləndirmə məlumatı göndər
-        socket.emit('room_joined', {
-            roomId: room.id,
-            roomName: room.name,
-            boardSize: room.boardSize,
-            // Gələcəkdə: playerSymbol: 'O' // Qoşulana avtomatik O verək?
-        });
-
-        // Otaqdakı digər oyunçuya rəqibin qoşulduğunu bildir (əgər varsa)
-        const opponentSocketId = room.players.find(id => id !== socket.id);
-        if (opponentSocketId) {
-             socket.to(opponentSocketId).emit('opponent_joined', { username: user.username });
-        }
-
-        broadcastRoomList(); // Otaq siyahısını yenilə
+        socket.emit('room_joined', { roomId: room.id, roomName: room.name, boardSize: room.boardSize });
+        const opponentSocketId = room.players.find(id => id !== socket.id); if (opponentSocketId) { socket.to(opponentSocketId).emit('opponent_joined', { username: user.username }); }
+        broadcastRoomList();
     });
 
-     // === OYUN İÇİ HADİSƏLƏR (Boş - Əlavə Olunmalıdır) ===
-     // Məsələn: Zər atma, simvol seçimi, gediş etmə, restart tələbi vs.
-     socket.on('dice_roll', (data) => {
-          // ... (zər nəticəsini otaqdakı digər oyunçuya göndər)
-     });
-     socket.on('symbol_choice', (data) => {
-         // ... (seçilən simvolu digər oyunçuya bildir və oyunu başlat)
-     });
-     socket.on('make_move', (data) => { // data = { index: clickedIndex }
-          const roomId = users[socket.id].currentRoom;
-          if (roomId && rooms[roomId]) {
-              // 1. Gedişin etibarlılığını yoxla (növbə bu oyunçudadırmı? xana boşdurmu?)
-              // 2. Oyun vəziyyətini yenilə (rooms[roomId].gameState)
-              // 3. Hər iki oyunçuya yeni oyun vəziyyətini göndər
-              // io.to(roomId).emit('game_state_update', rooms[roomId].gameState);
-              // 4. Qazanma/bərabərlik yoxlaması et
-              // 5. Növbəti oyunçuya keç
-              console.log(`Gediş alındı: ${data.index}, Otaq: ${roomId}`);
-              // Təkcə digər oyunçuya göndərmək üçün: socket.to(roomId).emit('opponent_moved', { index: data.index });
-              io.to(roomId).emit('opponent_moved', { index: data.index, player: users[socket.id].username }); // TƏXMİNİ
-          }
-     });
-     socket.on('request_restart', () => {
-         // ... (restart tələbini digər oyunçuya göndər)
-     });
-     socket.on('accept_restart', () => {
-         // ... (restartı təsdiqlə və oyunu yenidən başlat)
-     });
-     socket.on('leave_room', () => {
-          handleDisconnect(socket); // Ayrılma məntiqini istifadə et
-     });
-     // =======================================================
+    socket.on('make_move', (data) => { const roomId = users[socket.id]?.currentRoom; if(roomId) io.to(roomId).emit('opponent_moved', { index: data.index, player: users[socket.id]?.username }); });
+    socket.on('leave_room', () => { handleDisconnect(socket); });
 
-    // Bağlantı kəsildikdə və ya istifadəçi ayrıldıqda
-    socket.on('disconnect', () => {
-        console.log(`İstifadəçi ayrıldı: ${socket.id}`);
-        handleDisconnect(socket);
-    });
+    socket.on('disconnect', () => { console.log(`İstifadəçi ayrıldı: ${socket.id}`); handleDisconnect(socket); });
 
     function handleDisconnect(socket) {
-        const user = users[socket.id];
-        if (user && user.currentRoom) {
-            const roomId = user.currentRoom;
-            const room = rooms[roomId];
-            console.log(`Ayrılan istifadəçi ${user.username} otaqda idi: ${roomId}`);
-
-            if (room) {
-                // Oyunçunu otaqdan çıxart
-                room.players = room.players.filter(id => id !== socket.id);
-                console.log(`Otaqdakı oyunçular: ${room.players.length}`);
-
-                // Otaqdakı digər oyunçuya rəqibin ayrıldığını bildir (əgər varsa)
-                const remainingPlayerId = room.players[0]; // Əgər kimsə qalıbsa
-                if (remainingPlayerId) {
-                    io.to(remainingPlayerId).emit('opponent_left', { username: user.username });
-                     // Bəlkə qalan oyunçunu da lobbiyə qaytarmaq lazımdır? Və ya AI təklif etmək?
-                     // users[remainingPlayerId].currentRoom = null;
-                     // io.sockets.sockets.get(remainingPlayerId)?.leave(roomId);
-                }
-
-                 // Əgər otaq boş qaldısa, onu sil
-                 if (room.players.length === 0) {
-                     console.log(`Otaq ${roomId} boş qaldı və silinir.`);
-                     delete rooms[roomId];
-                 }
-                 broadcastRoomList(); // Otaq siyahısını yenilə
-            }
+        const user = users[socket.id]; if (!user) return; const roomId = user.currentRoom; const username = user.username; delete users[socket.id];
+        if (roomId && rooms[roomId]) { rooms[roomId].players = rooms[roomId].players.filter(id => id !== socket.id); const room = rooms[roomId];
+            if (room.players.length === 0) { console.log(`Otaq ${roomId} boş qaldı və silinir.`); delete rooms[roomId]; }
+            else { const remainingPlayerId = room.players[0]; io.to(remainingPlayerId).emit('opponent_left', { username: username }); } broadcastRoomList();
         }
-        // İstifadəçini ümumi siyahıdan sil
-        delete users[socket.id];
     }
-
 });
 
 // ----- Serveri Başlatma -----

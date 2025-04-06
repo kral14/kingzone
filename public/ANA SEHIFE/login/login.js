@@ -1,65 +1,80 @@
+// public/ANA SEHIFE/login/login.js (v2 - fetch API ilə)
+
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("Login JS Başladı.");
+    console.log("Login JS (v2 - fetch) Başladı.");
 
     const loginForm = document.getElementById('login-form');
     const loginButton = document.getElementById('login-button');
     const loadingOverlay = document.getElementById('loading-overlay');
-    const usernameInput = document.getElementById('username'); // Bu input HTML-də var
+    const usernameInput = document.getElementById('username'); // Bu HTML-də nickname olaraq qəbul edilməlidir
+    const passwordInput = document.getElementById('password');
+    // Giriş səhifəsində xəta mesajı üçün bir P elementi əlavə etmək yaxşı olardı
+    // Məsələn, formun içinə <p id="errorMessage" class="message"></p> əlavə edin
+    // Və CSS-də .message stilini (register.css-dən) bura da köçürün
+    const errorMessageDiv = document.getElementById('errorMessage'); // Əgər əlavə etsəniz
 
-    // Elementlərin mövcudluğunu yoxlayaq
-    if (loginForm && loadingOverlay && loginButton && usernameInput) {
-        loginForm.addEventListener('submit', (event) => {
-            event.preventDefault(); // Formun normal gönderimini engelle
+    if (loginForm && loadingOverlay && loginButton && usernameInput && passwordInput) {
+        loginForm.addEventListener('submit', async (event) => { // async etdik
+            event.preventDefault();
+            if (errorMessageDiv) errorMessageDiv.textContent = ''; // Xətanı təmizlə
+            if (errorMessageDiv) errorMessageDiv.style.color = '#ff4d4d'; // Standard xəta rəngi
+            loginButton.disabled = true; // Düyməni deaktiv et
 
-            console.log("Giriş Yap butonuna tıklandı.");
+            const nickname = usernameInput.value.trim(); // username inputunu nickname kimi qəbul edirik
+            const password = passwordInput.value;
 
-            // Şifrə inputunu da seçək (gələcəkdə validasiya üçün lazım ola bilər)
-            const passwordInput = document.getElementById('password');
+            // Sadə yoxlama
+            if (!nickname || !password) {
+                if (errorMessageDiv) errorMessageDiv.textContent = 'Nickname və şifrə daxil edilməlidir.';
+                else alert('Nickname və şifrə daxil edilməlidir.'); // Əgər errorMessageDiv yoxdursa
+                loginButton.disabled = false;
+                return;
+            }
 
-            // Kullanıcı adını alıp sonraki sayfaya gönderebiliriz
-            const username = usernameInput.value.trim();
-            const password = passwordInput ? passwordInput.value : ''; // Şifrəni alaq (əgər varsa)
-
-             // Sadə yoxlama: Sahələr boş olmasın (əgər tələb olunursa)
-             // if (!username || !password) {
-             //     alert("Zəhmət olmasa, həm kullanıcı adı, həm də şifrə sahəsini doldurun.");
-             //     return; // Prosesi dayandır
-             // }
-
-            const playerNameParam = encodeURIComponent(username || 'Misafir'); // Boşsa Misafir yap
-
-            // 1. Yükleniyor animasyonunu göster
+            // Yükleniyor animasyonunu göster (istəyə bağlı)
             loadingOverlay.classList.add('visible');
-            loginButton.disabled = true; // Butonu pasif yap
-            // Arxa planda scroll olmasın deyə body-ə class əlavə edə bilərik
-            // document.body.style.overflow = 'hidden';
 
-            // 2. Simüle edilmiş yükleme süresi (örneğin 1.5 saniye)
-            // Gerçek bir uygulamada burada sunucuya kullanıcı adı/şifrə göndərilir,
-            // cavab gözlənilir (uğurlu/uğursuz giriş).
-            setTimeout(() => {
-                console.log("Yönlendirme yapılıyor...");
+            // Məlumatları Serverə Göndərmək (fetch API)
+            try {
+                const response = await fetch('/login', { // Backend-dəki endpoint
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        nickname: nickname,
+                        password: password
+                    }),
+                });
 
-                // 3. Oyunlar sayfasına yönlendir (YOL YENİLƏNİB)
-                // Kullanıcı adını da URL parametresi olarak ekleyelim
-                // Bu kod sizi oyun seçmə səhifəsinə aparacaq
-                 window.location.href = `../../OYUNLAR/oyunlar/oyunlar.html?playerName=${playerNameParam}`;
-                
-                
+                const result = await response.json(); // Serverdən gələn cavabı JSON olaraq al
 
-                // Yönlendirme sonrası (genelde gerek kalmaz ama geri tuşu vb. durumlar üçün):
-                // loadingOverlay.classList.remove('visible');
-                // loginButton.disabled = false;
-                // document.body.style.overflow = 'auto'; // Scroll'u bərpa et
+                if (response.ok) { // HTTP status kodu 200 OK
+                    console.log('Giriş uğurlu:', result);
+                    // Session/Token olmadığı üçün sadəcə yönləndiririk
+                    // Uğurlu girişdən sonra oyunlar səhifəsinə yönləndir
+                    // Nickname-i URL parametri olaraq göndəririk
+                    const playerNameParam = encodeURIComponent(result.nickname || 'Qonaq');
+                     window.location.href = `../../OYUNLAR/oyunlar/oyunlar.html?playerName=${playerNameParam}`;
 
-            }, 1500); // 1500 milisaniye = 1.5 saniye bekle
+                    // Yönləndirmədən sonra overlayı gizlətməyə ehtiyac yoxdur
+                } else {
+                    // Server xətası (məs. 400, 401, 500)
+                    if (errorMessageDiv) errorMessageDiv.textContent = result.message || 'Giriş zamanı naməlum xəta baş verdi.';
+                    else alert(result.message || 'Giriş zamanı naməlum xəta baş verdi.'); // Fallback
+                    loadingOverlay.classList.remove('visible'); // Xəta varsa, overlayı gizlət
+                    loginButton.disabled = false; // Düyməni aktiv et
+                }
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                if (errorMessageDiv) errorMessageDiv.textContent = 'Serverlə əlaqə qurmaq mümkün olmadı. İnternetinizi yoxlayın.';
+                else alert('Serverlə əlaqə qurmaq mümkün olmadı. İnternetinizi yoxlayın.'); // Fallback
+                loadingOverlay.classList.remove('visible'); // Xəta varsa, overlayı gizlət
+                loginButton.disabled = false; // Şəbəkə xətası varsa, düyməni yenidən aktiv et
+            }
         });
     } else {
-        // Hansı elementin tapılmadığını daha dəqiq göstərək
         console.error("Giriş səhifəsində lazımi elementlərdən biri tapılmadı!");
-        if (!loginForm) console.error("ID 'login-form' olan element tapılmadı.");
-        if (!loginButton) console.error("ID 'login-button' olan element tapılmadı.");
-        if (!loadingOverlay) console.error("ID 'loading-overlay' olan element tapılmadı.");
-        if (!usernameInput) console.error("ID 'username' olan element tapılmadı.");
     }
 });

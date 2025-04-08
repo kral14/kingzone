@@ -1,5 +1,7 @@
 {
     "last_folder": "C:/Users/nesib/.android",
-    "always_on_top": true,
-    "minimize_to_tray": false
+    "always_on_top": false,
+    "minimize_to_tray": false,
+    "icon_pos_x": 361,
+    "icon_pos_y": 276
 }

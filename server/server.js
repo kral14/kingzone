@@ -197,13 +197,15 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// ----- Giriş Endpoint-i (/login) -----
+/// ----- Giriş Endpoint-i (/login) - Sadələşdirilmiş Session Save -----
 app.post('/login', async (req, res) => {
-  const { password, ...safeBody } = req.body;
+  const { password: plainPassword, ...safeBody } = req.body; // Şifrəni logdan çıxar
   console.log(`[POST /login] Sorğu alındı:`, safeBody);
-  const { nickname, password: plainPassword } = req.body;
+  const { nickname } = req.body; // Şifrəni artıq yuxarıda almışıq
 
-  if (!nickname || !plainPassword) { return res.status(400).json({ message: 'Nickname və şifrə daxil edilməlidir.' }); }
+  if (!nickname || !plainPassword) {
+      return res.status(400).json({ message: 'Nickname və şifrə daxil edilməlidir.' });
+  }
 
   let client;
   try {
@@ -229,40 +231,35 @@ app.post('/login', async (req, res) => {
     }
     console.log(`[POST /login] Şifrə doğrudur.`);
 
-    // Session Yarat və Məlumatları Əlavə Et
-    console.log(`[POST /login] Session yaradılır... SessionID=${req.sessionID}`);
+    // --- Session Yarat/Yenilə (Explicit save() olmadan!) ---
+    console.log(`[POST /login] Session user datası təyin edilir... Hazırki SessionID=${req.sessionID}`);
+    // Session obyektinə məlumatları yazırıq
     req.session.user = {
       id: user.id,
       nickname: user.nickname,
-      fullName: user.full_name
-      // Email kimi başqa məlumatları da bura əlavə etmək olar, amma ehtiyyatlı olun
+      fullName: user.full_name // DB-dəki sütun adı
     };
 
-    // Session-u yadda saxla (connect-pg-simple bunu avtomatik edir, amma callback ilə əmin olaq)
-    req.session.save((err) => {
-      if (err) {
-        console.error("[POST /login] Session save xətası:", err);
-        // Session save xətası olsa da, texniki olaraq giriş uğurlu ola bilər, amma istifadəçi problemlər yaşayacaq.
-        // 500 qaytarmaq daha məntiqlidir.
-        return res.status(500).json({ message: 'Session yadda saxlanarkən xəta baş verdi.' });
-      }
-      console.log(`[POST /login] UĞURLU: Session yaradıldı/yeniləndi. User: ${user.nickname}, SessionID: ${req.sessionID}`);
-      // Frontend-in nickname-i alması üçün cavaba əlavə edirik
-      res.status(200).json({ message: 'Giriş uğurlu!', nickname: user.nickname });
-    });
+    // !!! req.session.save() FUNKSİYASINI ÇAĞIRMIRIQ !!!
+    // express-session middleware cavab göndəriləndə dəyişikliyi görüb
+    // sessiyanı avtomatik save edib, cookie-ni təyin etməlidir.
+
+    console.log(`[POST /login] UĞURLU: İstifadəçi giriş etdi: ${user.nickname}. Session data təyin edildi.`);
+    // Cavabı birbaşa göndəririk
+    res.status(200).json({ message: 'Giriş uğurlu!', nickname: user.nickname });
+    // --- Session Sonu ---
 
   } catch (error) {
     console.error("[POST /login] XƏTA:", error);
+    // Xəta baş verərsə, sessiya save olunmayacaq və cookie set edilməyəcək
     res.status(500).json({ message: 'Server xətası baş verdi.' });
   } finally {
-      if (client) {
-          client.release();
-          console.log("[POST /login] DB bağlantısı buraxıldı.");
-      }
+    if (client) {
+         client.release();
+         console.log("[POST /login] DB bağlantısı buraxıldı.");
+    }
   }
 });
-
-// ----- Çıxış Endpoint-i (/logout) -----
 app.post('/logout', (req, res) => {
   const sessionId = req.sessionID;
   const userNickname = req.session.user?.nickname; // Əgər user varsa, nickname alaq

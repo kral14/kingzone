@@ -1,152 +1,201 @@
-// server.js (v7 - Tam Kod + Regenerate + Ətraflı Log)
-// HİSSƏ 1/3
+// server.js (PostgreSQL + DB Session Store ilə Tam Yenilənmiş və Düzəldilmiş)
+// Part 1/3
 
 // ---- Əsas Modulların Import Edilməsi ----
-require('dotenv').config(); // .env faylı ən başda yüklənməlidir!
+require('dotenv').config(); // .env faylındakı dəyişənləri yüklə (ƏN BAŞDA OLMALIDIR!)
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const bcrypt = require('bcrypt');
-const { Pool } = require('pg'); // PostgreSQL Client
-const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session); // PG Session Store
+const { Pool } = require('pg'); // PostgreSQL üçün
+const session = require('express-session'); // Session üçün
+const pgSession = require('connect-pg-simple')(session); // Sessionları DB-də saxlamaq üçün
 
-console.log("========================================");
-console.log("---- Server Başlatma Prosesi Başladı ----");
-console.log(`---- Zaman: ${new Date().toISOString()} ----`);
-console.log("========================================");
+const saltRounds = 10; // bcrypt üçün salt dövrü
 
-
-// ---- Mühit Dəyişənlərini Yoxlamaq ----
-console.log("[ENV Check] DATABASE_URL yüklənib?", !!process.env.DATABASE_URL);
-console.log("[ENV Check] SESSION_SECRET yüklənib?", !!process.env.SESSION_SECRET);
-if (!process.env.DATABASE_URL || !process.env.SESSION_SECRET) {
-    console.error("!!! KRİTİK XƏTA: DATABASE_URL və ya SESSION_SECRET mühit dəyişəni təyin edilməyib!");
-    console.error("!!! .env faylını və ya Render Environment Variables bölməsini yoxlayın.");
-    process.exit(1); // Tətbiqi dayandır
-}
-
-// ---- Express, HTTP Server, Socket.IO Quraşdırması ----
+// ---- Express və Socket.IO Tətbiqlərinin Yaradılması ----
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] } // CORS ayarları (Production üçün daha dəqiq ayarlayın)
+    cors: { origin: "*", methods: ["GET", "POST"] } // CORS ayarları (prod üçün daha məhdudlaşdırılmış ola bilər)
 });
-console.log("[Setup] Express, HTTP Server və Socket.IO yaradıldı.");
+console.log('[Setup] Express, HTTP Server və Socket.IO yaradıldı.');
 
-// ---- PostgreSQL Bağlantı Pool-u ----
+// ---- PostgreSQL Verilənlər Bazası Bağlantı Pool-u ----
+// .env faylında DATABASE_URL olduğundan əmin olun!
+if (!process.env.DATABASE_URL) {
+    console.error('XƏTA: DATABASE_URL mühit dəyişəni tapılmadı! .env faylını yoxlayın.');
+    process.exit(1); // Tətbiqi dayandır
+}
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Render üçün adətən lazımdır
+    rejectUnauthorized: false // Render kimi platformalar üçün lazımdır
   }
 });
+console.log('[Setup] PostgreSQL connection pool yaradıldı.');
 
-// Pool-un ilk bağlantısını yoxlayaq
-pool.query('SELECT NOW()')
-  .then(res => console.log(`---- Verilənlər bazasına uğurla qoşuldu: ${res.rows[0].now} ----`))
-  .catch(err => {
-      console.error('!!! Verilənlər bazasına qoşulma zamanı İLK XƏTA:', err.stack);
-      console.error('!!! DATABASE_URL düzgünlüyünü və DB statusunu yoxlayın!');
+// Bağlantını yoxlayaq
+pool.connect((err, client, release) => {
+  if (err) {
+    console.error('Verilənlər bazasına qoşulma xətası:', err.stack);
+    // Tətbiqi burada dayandırmaq məqsədəuyğun ola bilər
+    // process.exit(1);
+    return;
+  }
+  client.query('SELECT NOW()', (err, result) => {
+    release(); // Client-i pool-a qaytar
+    if (err) {
+      return console.error('Test sorğusu xətası:', err.stack);
+    }
+    console.log('---- Verilənlər bazasına uğurla qoşuldu:', result.rows[0].now, '----');
   });
-
-// Pool üçün ümumi xəta dinləyicisi
-pool.on('error', (err, client) => {
-  console.error('!!! PostgreSQL Pool XƏTASI:', err);
 });
-console.log("[Setup] PostgreSQL connection pool yaradıldı.");
 
+// ---- Express Ayarları (Sessiondan əvvəl) ----
+// Render və ya bənzər proxy arxasında işləyərkən cookie-lərin düzgün işləməsi üçün
+if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1); // Proxy-dən gələn headerlərə etibar et
+    console.log('[Setup] Express "trust proxy" ayarı aktiv edildi (production).');
+}
 
-// ---- Session Middleware (PostgreSQL Store ilə) ----
+// ---- Session Middleware Konfiqurasiyası (PostgreSQL Store ilə - DÜZƏLİŞLİ) ----
+// .env faylında SESSION_SECRET olduğundan əmin olun!
+if (!process.env.SESSION_SECRET) {
+    console.error('XƏTA: SESSION_SECRET mühit dəyişəni tapılmadı! .env faylını yoxlayın.');
+    process.exit(1); // Tətbiqi dayandır
+}
 const sessionMiddleware = session({
   store: new pgSession({
-    pool : pool,                // Yaradılmış pool-u veririk
-    tableName : 'user_sessions', // DB-dəki sessiya cədvəlinin adı
-    pruneSessionInterval: 60 * 60 // Hər saat köhnə sessiyaları təmizlə (saniyə) - optional
+    pool : pool,                // Mövcud connection pool-u istifadə et
+    tableName : 'user_sessions', // Session cədvəlinin adı
+    // createTableIfMissing: true // Cədvəl yoxdursa avtomatik yaratsın (test üçün faydalı ola bilər)
+    pruneSessionInterval: 60 * 5 // 5 dəqiqədə bir köhnəlmiş sessionları təmizlə (saniyə)
   }),
   secret: process.env.SESSION_SECRET,
-  resave: false, // Sessiya dəyişməyibsə yenidən save etmə
-  saveUninitialized: false, // Boş sessiyaları save etmə
+  resave: false, // Dəyişiklik olmadıqda yenidən yadda saxlama
+  saveUninitialized: false, // Giriş etməmiş user üçün session yaratma
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // Yalnız HTTPS ilə göndər
-    httpOnly: true, // JavaScript-in cookie-yə çıxışını əngəllə
+    secure: process.env.NODE_ENV === 'production', // HTTPS tələb edir
+    httpOnly: true, // JS ilə cookie-yə müdaxiləni əngəlləyir
     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 gün (millisaniyə)
-    sameSite: 'lax' // CSRF üçün standart qoruma
+    sameSite: 'lax' // <<<--- DÜZƏLİŞ: CSRF qoruması və yönləndirmələrdə cookie göndərilməsi üçün
   }
 });
-app.use(sessionMiddleware); // Sessiya middleware-i BÜTÜN route-lardan ƏVVƏL tətbiq et!
-console.log("[Setup] Session middleware (pgSession ilə) konfiqurasiya edildi və tətbiq olundu.");
+app.use(sessionMiddleware); // Session middleware-i tətbiq et
+console.log('[Setup] Session middleware (pgSession ilə) konfiqurasiya edildi və tətbiq olundu.');
+console.log(`[Setup] Session cookie ayarları: secure=${process.env.NODE_ENV === 'production'}, httpOnly=true, maxAge=${1000 * 60 * 60 * 24 * 7}, sameSite='lax'`);
 
-// ---- Digər Express Middleware-lər ----
-app.use(express.json()); // Gələn JSON request body-lərini parse et
-const publicDirectoryPath = path.join(__dirname, '../public');
-app.use(express.static(publicDirectoryPath)); // Statik faylları təqdim et
-console.log(`[Setup] JSON parser və Static files middleware tətbiq edildi. Statik qovluq: ${publicDirectoryPath}`);
 
-// ---- Autentifikasiya Yoxlama Middleware ----
+// ---- Digər Middleware-lər ----
+app.use(express.json()); // Gələn JSON body-lərini parse etmək üçün
+const publicDirectoryPath = path.join(__dirname, '../public'); // Statik faylların yolu
+app.use(express.static(publicDirectoryPath)); // Statik faylları (HTML, CSS, JS) təqdim et
+console.log('[Setup] JSON parser və Static files middleware tətbiq edildi. Statik qovluq:', publicDirectoryPath);
+
+// ---- Autentifikasiya Middleware Funksiyası ----
 const isAuthenticated = (req, res, next) => {
-  const path = req.originalUrl || req.path;
-  console.log(`[isAuthenticated] Yoxlanılır: Path=${path}, SessionID=${req.sessionID}`);
+  // Session və user.id yoxlanılır
   if (req.session && req.session.user && req.session.user.id) {
-    console.log(`[isAuthenticated] UĞURLU: User=${req.session.user.nickname}, Path=${path}`);
-    next();
+    return next(); // İstifadəçi giriş edib, davam et
   } else {
-    console.warn(`[isAuthenticated] UĞURSUZ: Giriş tələb olunur. Path=${path}, SessionID=${req.sessionID}, SessionUserVar=${!!req.session?.user}`);
-    res.status(401).json({ message: 'Bu əməliyyat üçün giriş tələb olunur.' });
+    console.warn(`[Auth Middleware] Giriş tələb olunan route üçün icazə verilmədi. SessionID: ${req.sessionID || 'N/A'}`);
+    // Giriş edilməyib
+    return res.status(401).json({ message: 'Bu əməliyyat üçün giriş tələb olunur.' }); // 401 Unauthorized
   }
 };
 
-// ----- Yardımçı Funksiyalar -----
-let rooms = {}; // Otaqlar yaddaşda
-let users = {}; // Qoşulu socketlər yaddaşda
-const saltRounds = 10; // bcrypt üçün
+// ----- Yardımçı Funksiyalar (Otaqlar üçün) -----
+// Qeyd: Otaq məlumatları hələ də yaddaşda saxlanılır.
+let rooms = {}; // Aktiv oyun otaqları (yaddaşda) { roomId: {id, name, password, players: [socketId1, socketId2], boardSize, creatorUsername, gameState} }
+let users = {}; // Qoşulu olan socket bağlantıları (yaddaşda) { socketId: {id, username, currentRoom} }
 
-function generateRoomId() { return Math.random().toString(36).substring(2, 9); }
-function broadcastRoomList() {
-    try {
-        const roomListForClients = Object.values(rooms).map(room => {
-             const p1Socket = room.players[0]; const p2Socket = room.players[1];
-             return { id: room.id, name: room.name, playerCount: room.players.length, hasPassword: !!room.password, boardSize: room.boardSize, creatorUsername: room.creatorUsername,
-                 player1Username: p1Socket && users[p1Socket] ? users[p1Socket].username : null,
-                 player2Username: p2Socket && users[p2Socket] ? users[p2Socket].username : null, }; });
-        io.emit('room_list_update', roomListForClients);
-    } catch (error) { console.error("[broadcastRoomList] XƏTA:", error); }
+function generateRoomId() {
+    return Math.random().toString(36).substring(2, 9);
 }
+
+// Otaq siyahısını formatlayıb bütün clientlərə göndərən funksiya
+function broadcastRoomList() {
+    const roomListForClients = Object.values(rooms).map(room => ({
+        id: room.id,
+        name: room.name,
+        playerCount: room.players.length,
+        hasPassword: !!room.password,
+        boardSize: room.boardSize,
+        creatorUsername: room.creatorUsername,
+        // 'users' obyektindəki socket ID-ləri ilə əlaqəli username-ləri tapırıq
+        player1Username: room.players[0] ? users[room.players[0]]?.username : null,
+        player2Username: room.players[1] ? users[room.players[1]]?.username : null,
+        // isAiRoom: room.isAiRoom // AI otaqları üçün əlavə edilə bilər
+    }));
+    io.emit('room_list_update', roomListForClients);
+    // console.log('[Broadcast] Otaq siyahısı yeniləndi və göndərildi.'); // Çox tez-tez log yarada bilər
+}
+
+// --- Part 1 Sonu ---
+// server.js
+// Part 2/3 - HTTP API Routes
+
+// ... (Part 1-dən sonra gələn kod) ...
 
 // ==========================================
 // ===== HTTP API MARŞRUTLARI (ROUTES) ======
 // ==========================================
-console.log("[Setup] API Endpointləri təyin edilir...");
+console.log('[Setup] API Endpointləri təyin edilir...');
 
 // ----- Qeydiyyat Endpoint-i (/register) -----
 app.post('/register', async (req, res) => {
-  const { password: plainPassword, ...safeBody } = req.body;
-  console.log(`[API /register] Sorğu alındı:`, safeBody);
-  const { fullName, email, nickname } = safeBody;
+  const { fullName, email, nickname, password } = req.body;
+  console.log(`[API /register] Sorğu alındı: { nickname: '${nickname}' }`);
 
-  // Validasiyalar
-  if (!fullName || !email || !nickname || !plainPassword) { console.warn("[API /register] Validasiya Xətası: Boş sahələr."); return res.status(400).json({ message: 'Bütün sahələr doldurulmalıdır.' }); }
-  if (plainPassword.length < 6) { console.warn("[API /register] Validasiya Xətası: Şifrə qısadır."); return res.status(400).json({ message: 'Şifrə minimum 6 simvol olmalıdır.' }); }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { console.warn("[API /register] Validasiya Xətası: Email formatı səhvdir."); return res.status(400).json({ message: 'Düzgün e-poçt ünvanı daxil edin.' }); }
-  if (/\s/.test(nickname)) { console.warn("[API /register] Validasiya Xətası: Nickname-də boşluq."); return res.status(400).json({ message: 'Nickname boşluq ehtiva edə bilməz.' }); }
+  // Server-side Validasiyalar
+  if (!fullName || !email || !nickname || !password) {
+    console.log('[API /register] Xəta: Bütün sahələr doldurulmayıb.');
+    return res.status(400).json({ message: 'Bütün sahələr doldurulmalıdır.' });
+  }
+  if (password.length < 6) {
+    console.log('[API /register] Xəta: Şifrə çox qısadır.');
+    return res.status(400).json({ message: 'Şifrə minimum 6 simvol olmalıdır.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+     console.log('[API /register] Xəta: E-poçt formatı yanlışdır.');
+    return res.status(400).json({ message: 'Düzgün e-poçt ünvanı daxil edin.' });
+  }
+  if (/\s/.test(nickname)) {
+    console.log('[API /register] Xəta: Nickname-də boşluq var.');
+    return res.status(400).json({ message: 'Nickname boşluq ehtiva edə bilməz.' });
+  }
 
   let client;
   try {
     client = await pool.connect();
-    console.log("[API /register] DB bağlantısı alındı.");
+    console.log('[API /register] DB bağlantısı alındı.');
 
-    // Unikallıq yoxlaması
+    // Email və Nickname unikallığını yoxla
     const emailCheck = await client.query('SELECT 1 FROM users WHERE email = $1 LIMIT 1', [email]);
-    if (emailCheck.rowCount > 0) { console.warn(`[API /register] Email mövcuddur: ${email}`); return res.status(409).json({ message: 'Bu e-poçt artıq qeydiyyatdan keçib.' }); }
+    if (emailCheck.rowCount > 0) {
+      console.log(`[API /register] Xəta: E-poçt (${email}) artıq mövcuddur.`);
+      return res.status(409).json({ message: 'Bu e-poçt artıq qeydiyyatdan keçib.' });
+    }
     const nicknameCheck = await client.query('SELECT 1 FROM users WHERE LOWER(nickname) = LOWER($1) LIMIT 1', [nickname]);
-    if (nicknameCheck.rowCount > 0) { console.warn(`[API /register] Nickname mövcuddur: ${nickname}`); return res.status(409).json({ message: 'Bu nickname artıq istifadə olunur.' }); }
+    if (nicknameCheck.rowCount > 0) {
+       console.log(`[API /register] Xəta: Nickname (${nickname}) artıq mövcuddur.`);
+      return res.status(409).json({ message: 'Bu nickname artıq istifadə olunur.' });
+    }
 
-    // Hashləmə və DB-yə yazma
+    // Şifrəni hashla
     console.log(`[API /register] ${nickname} üçün şifrə hashlanır...`);
-    const hashedPassword = await bcrypt.hash(plainPassword, saltRounds);
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    // Unikal ID üçün UUID və ya DB SERIAL istifadə etmək daha yaxşıdır, amma hələlik Date.now()
     const newUserId = Date.now().toString();
-    const insertQuery = `INSERT INTO users (id, full_name, email, nickname, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id, nickname;`;
+
+    // Yeni istifadəçini DB-yə əlavə et
+    const insertQuery = `
+      INSERT INTO users (id, full_name, email, nickname, password_hash)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, nickname;
+    `;
     const values = [newUserId, fullName, email, nickname, hashedPassword];
     console.log(`[API /register] İstifadəçi DB-yə yazılır: ${nickname}`);
     const result = await client.query(insertQuery, values);
@@ -155,183 +204,199 @@ app.post('/register', async (req, res) => {
     res.status(201).json({ message: 'Qeydiyyat uğurlu oldu!' });
 
   } catch (error) {
-    console.error("[API /register] Gözlənilməz XƏTA:", error);
-    if (error.code === '23505') { /* ... unique constraint xətaları ... */ }
-    res.status(500).json({ message: 'Server xətası baş verdi.' });
+    console.error("[API /register] Qeydiyyat xətası:", error);
+    if (error.code === '23505') { // PostgreSQL unique violation
+        if (error.constraint && error.constraint.includes('email')) {
+             return res.status(409).json({ message: 'Bu e-poçt artıq mövcuddur (DB).' });
+         }
+         if (error.constraint && error.constraint.includes('nickname')) {
+             return res.status(409).json({ message: 'Bu nickname artıq mövcuddur (DB).' });
+         }
+    }
+    res.status(500).json({ message: 'Server xətası.' });
   } finally {
-      if (client) { client.release(); console.log("[API /register] DB bağlantısı buraxıldı."); }
+    if (client) {
+        client.release(); // Bağlantını pool-a qaytar
+         console.log('[API /register] DB bağlantısı buraxıldı.');
+    }
   }
 });
 
-// ----- Giriş Endpoint-i (/login) - Regenerate ilə -----
+// ----- Giriş Endpoint-i (/login) - DÜZƏLİŞLİ və ƏTRAFLI LOGGING ilə -----
 app.post('/login', async (req, res) => {
-  const { password: plainPassword, ...safeBody } = req.body;
-  console.log(`[API /login] Sorğu alındı:`, safeBody);
-  const { nickname } = safeBody;
+    const { nickname, password } = req.body;
+    let client; // DB client-i əlçatan etmək üçün
 
-  if (!nickname || !plainPassword) { console.warn("[API /login] Validasiya Xətası: Nickname/şifrə boşdur."); return res.status(400).json({ message: 'Nickname və şifrə daxil edilməlidir.' }); }
+    console.log(`[API /login] Sorğu alındı: { nickname: '${nickname}' }`);
 
-  let client;
-  try {
-    client = await pool.connect();
-    console.log("[API /login] DB bağlantısı alındı.");
-
-    // İstifadəçini tap
-    console.log(`[API /login] İstifadəçi axtarılır: ${nickname}`);
-    const result = await client.query('SELECT * FROM users WHERE LOWER(nickname) = LOWER($1)', [nickname]);
-    if (result.rowCount === 0) {
-        console.warn(`[API /login] İstifadəçi tapılmadı: ${nickname}`);
-        if (client) client.release();
-        return res.status(401).json({ message: 'Nickname və ya şifrə yanlışdır.' });
+    if (!nickname || !password) {
+        console.log('[API /login] Xəta: Nickname və ya şifrə boşdur.');
+        return res.status(400).json({ message: 'Nickname və şifrə daxil edilməlidir.' });
     }
-    const user = result.rows[0];
-    console.log(`[API /login] İstifadəçi tapıldı: ${user.nickname} (ID: ${user.id})`);
 
-    // Şifrəni yoxla
-    console.log(`[API /login] Şifrə yoxlanılır...`);
-    const isPasswordCorrect = await bcrypt.compare(plainPassword, user.password_hash);
-    if (!isPasswordCorrect) {
-        console.warn(`[API /login] Şifrə yanlışdır: ${nickname}`);
-        if (client) client.release();
-        return res.status(401).json({ message: 'Nickname və ya şifrə yanlışdır.' });
-    }
-    console.log(`[API /login] Şifrə doğrudur.`);
+    try {
+        client = await pool.connect();
+        console.log(`[API /login] DB bağlantısı alındı.`);
 
-    // Sessionu Yenidən Yarat (Regenerate)
-    const oldSessionId = req.sessionID;
-    console.log(`[API /login] Session regenerate edilir... Köhnə SessionID=${oldSessionId}`);
-    req.session.regenerate((err) => {
-        if (err) {
-            console.error("[API /login] Session regenerate XƏTASI:", err);
-            if (client) { client.release(); console.log("[API /login] DB bağlantısı regenerate xətasından sonra buraxıldı."); }
-            return res.status(500).json({ message: 'Sessiya yaradılarkən daxili xəta baş verdi.' });
+        const result = await client.query('SELECT * FROM users WHERE LOWER(nickname) = LOWER($1)', [nickname]);
+        if (result.rowCount === 0) {
+            console.log(`[API /login] İstifadəçi tapılmadı: ${nickname}`);
+            // Security best practice: Don't reveal which one is wrong
+            return res.status(401).json({ message: 'Nickname və ya şifrə yanlışdır.' });
         }
+        const user = result.rows[0];
+        console.log(`[API /login] İstifadəçi tapıldı: ${user.nickname} (ID: ${user.id})`);
 
-        // Regenerate uğurlu, user datasını YENİ sessiyaya əlavə et
-        const newSessionId = req.sessionID;
-        console.log(`[API /login] Regenerate uğurlu. Yeni SessionID=${newSessionId}. User datası əlavə edilir...`);
-        req.session.user = { id: user.id, nickname: user.nickname, fullName: user.full_name };
+        console.log(`[API /login] Şifrə yoxlanılır...`);
+        const isPasswordCorrect = await bcrypt.compare(password, user.password_hash);
+        if (!isPasswordCorrect) {
+            console.log(`[API /login] Şifrə yanlışdır: ${nickname}`);
+            return res.status(401).json({ message: 'Nickname və ya şifrə yanlışdır.' });
+        }
+        console.log(`[API /login] Şifrə doğrudur: ${nickname}`);
 
-        console.log(`[API /login] UĞURLU: İstifadəçi giriş etdi: ${user.nickname}. Yeni sessiya yaradıldı (ID: ${newSessionId}).`);
-        res.status(200).json({ message: 'Giriş uğurlu!', nickname: user.nickname });
+        const oldSessionID = req.sessionID;
+        console.log(`[API /login] Session regenerate edilir... Köhnə SessionID=${oldSessionID}`);
 
-        if (client) { client.release(); console.log("[API /login] DB bağlantısı regenerate callback içində buraxıldı."); }
-    }); // req.session.regenerate sonu
+        // Session regenerate et (session fixation hücumlarına qarşı)
+        req.session.regenerate(regenerateErr => {
+            if (regenerateErr) {
+                console.error("[API /login] Session regenerate xətası:", regenerateErr);
+                // Status kodunu 500 etmək daha məntiqlidir
+                if (!res.headersSent) {
+                   return res.status(500).json({ message: 'Session yaradılarkən xəta baş verdi (regenerate).' });
+                } else {
+                   console.error("[API /login] Regenerate xətası oldu amma cavab artıq göndərilmişdi.");
+                   return;
+                }
+            }
 
-  } catch (error) {
-    console.error("[API /login] Gözlənilməz XƏTA (Try Catch Bloku):", error);
-    if (client) { client.release(); console.log("[API /login] DB bağlantısı catch blokunda buraxıldı."); }
-    res.status(500).json({ message: 'Server xətası baş verdi.' });
-  }
+            const newSessionID = req.sessionID;
+            console.log(`[API /login] Session regenerate edildi. Yeni SessionID=${newSessionID}. User datası təyin edilir...`);
+
+            // User məlumatlarını YENİ sessiona əlavə et
+            req.session.user = {
+                id: user.id,
+                nickname: user.nickname,
+                fullName: user.full_name
+                // Email və digər həssas olmayan datanı da əlavə etmək olar
+            };
+            console.log(`[API /login] req.session.user təyin edildi:`, JSON.stringify(req.session.user)); // Datanın təyin olunduğunu yoxla
+
+            // Sessionu AÇIQ ŞƏKİLDƏ YADDA SAXLA və cavabı GÖZLƏ
+            req.session.save(saveErr => {
+                if (saveErr) {
+                    console.error("[API /login] Session save xətası:", saveErr);
+                     if (!res.headersSent) {
+                         return res.status(500).json({ message: 'Session yaradılarkən xəta baş verdi (save).' });
+                     } else {
+                         console.error("[API /login] Save xətası oldu amma cavab artıq göndərilmişdi.");
+                         return;
+                     }
+                }
+                // Session uğurla DB-də saxlandıqdan sonra cavab göndər
+                console.log(`[API /login] UĞURLU: Session saxlandı. User: ${req.session.user?.nickname}, SessionID: ${req.sessionID}`);
+                 if (!res.headersSent) {
+                      // Frontendə nickname qaytarmaq faydalıdır (URL yaratmaq üçün vs.)
+                      res.status(200).json({ message: 'Giriş uğurlu!', nickname: user.nickname });
+                 } else {
+                      console.warn("[API /login] Session save callback-i işlədi amma cavab artıq göndərilmişdi?");
+                 }
+            });
+        });
+
+    } catch (error) {
+        console.error("[API /login] Ümumi giriş xətası:", error);
+         if (!res.headersSent) {
+             res.status(500).json({ message: 'Server xətası.' });
+         }
+    } finally {
+        if (client) {
+            client.release(); // Bağlantını pool-a qaytar
+            console.log(`[API /login] DB bağlantısı buraxıldı (Finally bloku).`);
+        }
+    }
 });
-
-// ----- Hələlik Bu Qədər (Hissə 1) -----
-// server.js (v7 - Tam Kod + Regenerate + Ətraflı Log)
-// HİSSƏ 2/3
 
 // ----- Çıxış Endpoint-i (/logout) -----
 app.post('/logout', (req, res) => {
-  const sessionId = req.sessionID;
-  const userNickname = req.session.user?.nickname; // Sessiyada user varsa, nickname alırıq
-
-  console.log(`[API /logout] Sorğu alındı. SessionID=${sessionId}, User=${userNickname || 'N/A'}`);
-
   if (req.session.user) {
-    // Sessiyanı məhv et (DB-dən siləcək)
+    const nickname = req.session.user.nickname;
+    console.log(`[API /logout] Çıxış tələbi alındı: ${nickname}, SessionID: ${req.sessionID}`);
     req.session.destroy(err => {
       if (err) {
-        console.error(`[API /logout] Session destroy XƏTASI. SessionID=${sessionId}:`, err);
-        // Sessiya silinməsə belə, cookie-ni təmizləməyə cəhd edək
-        const cookieName = req.session?.cookie?.name || 'connect.sid';
-        res.clearCookie(cookieName);
+        console.error("[API /logout] Session destroy xətası:", err);
         return res.status(500).json({ message: "Çıxış zamanı xəta baş verdi." });
       }
-
-      // Sessiya uğurla silindi, indi cookie-ni brauzerdən təmizlə
-      // Cookie adını session konfiqurasiyasından götürək, tapılmasa 'connect.sid' istifadə edək
-      const cookieName = 'connect.sid'; // express-session üçün default ad (əgər config-də name təyin edilməyibsə)
-      // const cookieName = sessionMiddleware.cookie.name || 'connect.sid'; // Bu daha doğru olardı, amma sessionMiddleware əlçatan olmaya bilər
-      res.clearCookie(cookieName);
-      console.log(`[API /logout] UĞURLU: User: ${userNickname}. SessionID=${sessionId} silindi. Cookie '${cookieName}' təmizləndi.`);
+      // connect-pg-simple DB-dən avtomatik silməlidir
+      // Cookie-ni təmizləmək brauzerə kömək edir
+      res.clearCookie('connect.sid'); // Standart session cookie adı (əgər dəyişməyibsə)
+      console.log(`[API /logout] İstifadəçi çıxış etdi: ${nickname}. Session məhv edildi.`);
       res.status(200).json({ message: "Uğurla çıxış edildi." });
     });
   } else {
-    // Giriş edilməmiş istifadəçi çıxış etməyə çalışır
-    console.warn(`[API /logout] Çıxış üçün aktiv sessiya tapılmadı. SessionID=${sessionId}`);
-    res.clearCookie('connect.sid'); // Hər ehtimala qarşı standart cookie-ni təmizlə
+    console.log(`[API /logout] Çıxış tələbi alındı amma aktiv session yox idi.`);
     res.status(400).json({ message: "Giriş edilməyib." });
   }
 });
 
 // ----- Autentifikasiya Vəziyyətini Yoxlama Endpoint-i (/check-auth) -----
-// Bu endpoint frontend tərəfindən səhifə yüklənəndə çağırılır
 app.get('/check-auth', (req, res) => {
-  // Ətraflı logging
-  console.log('--- /check-auth sorğusu gəldi ---');
-  console.log('Sorğu üçün Session ID:', req.sessionID);
-  console.log('Server req.session obyektini görür mü?', !!req.session);
-  console.log('Server req.session.user obyektini görür mü?', !!req.session?.user);
-  if (req.session?.user) {
-      console.log('Serverin gördüyü Session user datası:', req.session.user);
-  } else {
-      console.log('Server session və ya user datasını bu sorğu üçün tapa bilmir!');
-  }
-  console.log('--------------------------------');
+  console.log(`--- /check-auth sorğusu gəldi ---`);
+  console.log(`Sorğu üçün Session ID: ${req.sessionID}`);
+  console.log(`Server req.session obyektini görür mü? ${!!req.session}`);
+  // user obyektinin içini də loglayaq (əgər varsa)
+  console.log(`Server req.session.user obyektini görür mü? ${!!req.session?.user}`, req.session?.user ? `(${JSON.stringify(req.session.user)})` : '');
 
-  // Sessiya və içində user məlumatı varsa, uğurlu cavab qaytar
   if (req.session && req.session.user && req.session.user.id) {
-    console.log(`[/check-auth] Cavab: Uğurlu (200). User: ${req.session.user.nickname}`);
-    // Frontend-in ehtiyacı olan user məlumatlarını qaytarırıq (şifrəsiz)
-    res.status(200).json({ loggedIn: true, user: req.session.user }); // Tam user datasını göndəririk
+    // Giriş edilib, həssas olmayan məlumatları qaytar
+    console.log(`[/check-auth] Cavab: Uğurlu. User: ${req.session.user.nickname}, SessionID=${req.sessionID}`);
+    console.log('--------------------------------');
+    res.status(200).json({ loggedIn: true, user: req.session.user });
   } else {
-    // Sessiya yoxdursa və ya user məlumatı yoxdursa, 401 qaytar
-    console.warn(`[/check-auth] Cavab: Uğursuz (401). SessionID=${req.sessionID}`);
-    res.status(401).json({ loggedIn: false });
+    // Giriş edilməyib və ya sessionda user datası yoxdur
+    console.log('Server session və ya user datasını bu sorğu üçün tapa bilmir!');
+    console.log('--------------------------------');
+    // Status 401 göndərildiyindən əmin olmaq üçün
+     res.status(401).json({ loggedIn: false, message: 'Sessiya tapılmadı və ya etibarsızdır.' });
   }
 });
 
 
-// ==========================================
-// ===== Profil API Endpointləri ==========
-// ==========================================
-console.log("[Setup] Profil API endpointləri təyin edilir...");
-
 // ----- Profil Məlumatlarını Almaq Endpoint-i (/profile/:nickname) -----
-app.get('/profile/:nickname', isAuthenticated, async (req, res) => { // isAuthenticated middleware istifadə edirik
+// Qeyd: Frontend bu endpointə müraciət edir, :nickname parametrini saxlayırıq
+// Ancaq təhlükəsizlik üçün yalnız giriş etmiş istifadəçinin öz profilinə baxmasına icazə veririk.
+app.get('/profile/:nickname', isAuthenticated, async (req, res) => {
   const requestedNickname = req.params.nickname;
-  const loggedInUserId = req.session.user.id; // Artıq isAuthenticated təmin edir ki, bunlar var
-  const loggedInNickname = req.session.user.nickname;
-  console.log(`[API GET /profile/${requestedNickname}] Sorğu alındı. Login: ${loggedInNickname} (ID: ${loggedInUserId})`);
+  const loggedInNickname = req.session.user.nickname; // isAuthenticated bunu təmin edir
+  const loggedInUserId = req.session.user.id;
 
-  // Təhlükəsizlik yoxlaması (URL vs Session)
+  console.log(`[API /profile GET] Sorğu: ${requestedNickname}, Giriş edən: ${loggedInNickname}`);
+
+  // Parametrdəki nickname ilə sessiondakı nickname eyni olmalıdır
   if (loggedInNickname.toLowerCase() !== requestedNickname.toLowerCase()) {
-    console.warn(`[API GET /profile/${requestedNickname}] İCAZƏ XƏTASI: ${loggedInNickname} başqasının profilinə baxmağa çalışır.`);
+      console.warn(`[API /profile GET] İcazə xətası: ${loggedInNickname} istifadəçisi ${requestedNickname} profilinə baxmağa çalışdı.`);
     return res.status(403).json({ message: 'Başqasının profilinə baxmaq icazəsi yoxdur.' });
   }
 
   let client;
   try {
-    client = await pool.connect();
-    console.log(`[API GET /profile/${requestedNickname}] DB bağlantısı alındı.`);
-    // İstifadəçini DB-dən al (şifrəsiz) - ID ilə axtarmaq daha etibarlıdır
-    const result = await client.query(
-      'SELECT id, full_name, email, nickname FROM users WHERE id = $1',
-      [loggedInUserId]
-    );
-
+      client = await pool.connect();
+    // DB-dən məlumatları al (şifrəsiz)
+    const result = await client.query('SELECT id, full_name, email, nickname FROM users WHERE id = $1', [loggedInUserId]);
     if (result.rowCount > 0) {
-      const userProfile = result.rows[0];
-      console.log(`[API GET /profile/${requestedNickname}] UĞURLU: Profil tapıldı:`, userProfile);
-      res.status(200).json(userProfile);
+      console.log(`[API /profile GET] Profil məlumatları tapıldı: ${loggedInNickname}`);
+      res.status(200).json(result.rows[0]);
     } else {
-      console.error(`[API GET /profile/${requestedNickname}] XƏTA: İstifadəçi DB-də tapılmadı (ID: ${loggedInUserId}).`);
-      res.status(404).json({ message: 'İstifadəçi tapılmadı.' });
+      // Bu baş verməməlidir, çünki isAuthenticated userin mövcud olduğunu yoxlayır
+      console.error(`[API /profile GET] Xəta: authenticated user (ID: ${loggedInUserId}) DB-də tapılmadı!`);
+      res.status(404).json({ message: 'İstifadəçi tapılmadı (DB-də). Bu gözlənilməz xətadır.' });
     }
   } catch(error) {
-    console.error(`[API GET /profile/${requestedNickname}] Gözlənilməz XƏTA:`, error);
-    res.status(500).json({ message: 'Server xətası baş verdi.' });
-  } finally {
-      if (client) { client.release(); console.log(`[API GET /profile/${requestedNickname}] DB bağlantısı buraxıldı.`); }
+      console.error("[API /profile GET] Profil alma xətası:", error);
+      res.status(500).json({ message: 'Server xətası.' });
+   } finally {
+      if (client) client.release();
   }
 });
 
@@ -340,333 +405,508 @@ app.put('/profile/:nickname', isAuthenticated, async (req, res) => {
   const currentNicknameFromParam = req.params.nickname;
   const loggedInUserId = req.session.user.id;
   const loggedInNickname = req.session.user.nickname;
+  const { fullName, email, nickname: newNickname, password } = req.body; // Frontend 'nickname' göndərir
 
-  const { password: plainPassword, ...safeBody } = req.body; // Şifrəni logdan çıxar
-  console.log(`[API PUT /profile/${currentNicknameFromParam}] Sorğu alındı. Login: ${loggedInNickname} (ID: ${loggedInUserId}). Body:`, safeBody);
+  console.log(`[API /profile PUT] Sorğu: ${currentNicknameFromParam}, Giriş edən: ${loggedInNickname}, Yeni Data:`, {fullName, email, newNickname, password: password ? '***' : 'N/A'});
 
-  const { fullName, email, nickname: newNickname } = safeBody; // Yeni dəyərlər
-
-  // Təhlükəsizlik yoxlaması
+  // Yenə də yoxlayaq ki, user öz profilini dəyişir
   if (loggedInNickname.toLowerCase() !== currentNicknameFromParam.toLowerCase()) {
-      console.warn(`[API PUT /profile/${currentNicknameFromParam}] İCAZƏ XƏTASI: ${loggedInNickname} başqasının profilini dəyişməyə çalışır.`);
-      return res.status(403).json({ message: 'Başqasının profilini dəyişməyə icazə yoxdur.' });
+      console.warn(`[API /profile PUT] İcazə xətası: ${loggedInNickname} istifadəçisi ${currentNicknameFromParam} profilini dəyişməyə çalışdı.`);
+    return res.status(403).json({ message: 'Başqasının profilini dəyişməyə icazə yoxdur.' });
   }
 
-  // Validasiyalar
-  if (!fullName || !email || !newNickname) { console.warn(`[API PUT /profile/${currentNicknameFromParam}] Validasiya: Boş sahə var.`); return res.status(400).json({ message: 'Ad Soyad, E-poçt və Nickname boş ola bilməz.' }); }
-  if (/\s/.test(newNickname)) { console.warn(`[API PUT /profile/${currentNicknameFromParam}] Validasiya: Nickname-də boşluq var.`); return res.status(400).json({ message: 'Nickname boşluq ehtiva edə bilməz.' }); }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { console.warn(`[API PUT /profile/${currentNicknameFromParam}] Validasiya: Email formatı səhvdir.`); return res.status(400).json({ message: 'Düzgün e-poçt ünvanı daxil edin.' }); }
-  if (plainPassword && plainPassword.length < 6) { console.warn(`[API PUT /profile/${currentNicknameFromParam}] Validasiya: Yeni şifrə çox qısadır.`); return res.status(400).json({ message: 'Yeni şifrə minimum 6 simvol olmalıdır.' }); }
+  // Validasiyalar (yeni dəyərlər üçün)
+  if (!fullName || !email || !newNickname) {
+      console.log('[API /profile PUT] Xəta: Ad/Email/Nickname boşdur.');
+      return res.status(400).json({ message: 'Ad Soyad, E-poçt və Nickname boş ola bilməz.' });
+  }
+  if (/\s/.test(newNickname)) {
+      console.log('[API /profile PUT] Xəta: Yeni nickname-də boşluq var.');
+      return res.status(400).json({ message: 'Nickname boşluq ehtiva edə bilməz.' });
+   }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      console.log('[API /profile PUT] Xəta: Yeni email formatı yanlışdır.');
+      return res.status(400).json({ message: 'Düzgün e-poçt ünvanı daxil edin.' });
+  }
 
   let client;
   try {
-    client = await pool.connect();
-    console.log(`[API PUT /profile/${currentNicknameFromParam}] DB bağlantısı alındı.`);
+      client = await pool.connect();
+      console.log('[API /profile PUT] DB bağlantısı alındı.');
 
-    // Unikallıq yoxlaması (email və yeni nickname üçün - özündən başqa)
+    // Unikallıq yoxlaması (email, newNickname - özündən başqa)
     const emailExists = await client.query('SELECT 1 FROM users WHERE email = $1 AND id != $2 LIMIT 1', [email, loggedInUserId]);
-    if (emailExists.rowCount > 0) { console.warn(`[API PUT /profile/${currentNicknameFromParam}] Email (${email}) başqasına aiddir.`); return res.status(409).json({ message: 'Bu e-poçt başqa istifadəçi tərəfindən istifadə olunur.' }); }
-
-    if (newNickname.toLowerCase() !== loggedInNickname.toLowerCase()) {
-      const nicknameExists = await client.query('SELECT 1 FROM users WHERE LOWER(nickname) = LOWER($1) AND id != $2 LIMIT 1', [newNickname, loggedInUserId]);
-      if (nicknameExists.rowCount > 0) { console.warn(`[API PUT /profile/${currentNicknameFromParam}] Nickname (${newNickname}) başqasına aiddir.`); return res.status(409).json({ message: 'Bu nickname artıq başqası tərəfindən istifadə olunur.' }); }
+    if (emailExists.rowCount > 0) {
+        console.log(`[API /profile PUT] Xəta: E-poçt (${email}) artıq başqası tərəfindən istifadə olunur.`);
+        return res.status(409).json({ message: 'Bu e-poçt artıq başqası tərəfindən istifadə olunur.' });
+    }
+    const nicknameExists = await client.query('SELECT 1 FROM users WHERE LOWER(nickname) = LOWER($1) AND id != $2 LIMIT 1', [newNickname, loggedInUserId]);
+    if (nicknameExists.rowCount > 0) {
+        console.log(`[API /profile PUT] Xəta: Nickname (${newNickname}) artıq başqası tərəfindən istifadə olunur.`);
+        return res.status(409).json({ message: 'Bu nickname artıq başqası tərəfindən istifadə olunur.' });
     }
 
-    // UPDATE sorğusunu hazırla
+    // Məlumatları yeniləmək üçün UPDATE sorğusu
     let updateFields = ['full_name = $1', 'email = $2', 'nickname = $3'];
     let queryParams = [fullName, email, newNickname];
-    let paramIndex = 4;
+    let paramIndex = 4; // PostgreSQL parametr indeksləri 1-dən başlayır
 
-    if (plainPassword) { // Yeni şifrə varsa hashla və əlavə et
-      console.log(`[API PUT /profile/${currentNicknameFromParam}] Yeni şifrə hashlanır...`);
-      const hashedPassword = await bcrypt.hash(plainPassword, saltRounds);
+    if (password) { // Yeni şifrə varsa
+      if (password.length < 6) {
+           console.log('[API /profile PUT] Xəta: Yeni şifrə çox qısadır.');
+           return res.status(400).json({ message: 'Yeni şifrə minimum 6 simvol olmalıdır.' });
+      }
+      console.log('[API /profile PUT] Yeni şifrə hashlanır...');
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
       updateFields.push(`password_hash = $${paramIndex}`);
       queryParams.push(hashedPassword);
       paramIndex++;
     }
 
-    const updateQuery = `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramIndex} RETURNING id, full_name, email, nickname;`;
+    // WHERE şərtini əlavə edək
     queryParams.push(loggedInUserId);
 
-    // Sorğunu icra et
-    console.log(`[API PUT /profile/${currentNicknameFromParam}] DB UPDATE sorğusu icra edilir...`);
+    const updateQuery = `
+      UPDATE users SET ${updateFields.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING id, full_name, email, nickname; -- Yenilənmiş məlumatları qaytar
+    `;
+     console.log('[API /profile PUT] Update sorğusu hazırlanır...');
     const result = await client.query(updateQuery, queryParams);
 
-    if (result.rowCount === 0) { console.error(`[API PUT /profile/${currentNicknameFromParam}] XƏTA: User DB-də tapılmadı (ID: ${loggedInUserId})`); return res.status(404).json({ message: 'Yenilənəcək istifadəçi tapılmadı.' }); }
+    if (result.rowCount === 0) {
+        // Bu baş verməməlidir
+        console.error(`[API /profile PUT] Xəta: Yenilənəcək istifadəçi (ID: ${loggedInUserId}) tapılmadı.`);
+        return res.status(404).json({ message: 'Yenilənəcək istifadəçi tapılmadı.' });
+    }
     const updatedUser = result.rows[0];
-    console.log(`[API PUT /profile/${currentNicknameFromParam}] DB yeniləndi. Yenilənmiş data:`, {id: updatedUser.id, nickname: updatedUser.nickname});
+    console.log(`[API /profile PUT] Profil DB-də yeniləndi: ${updatedUser.nickname}`);
 
-    // Sessionu yenilə
-    console.log(`[API PUT /profile/${currentNicknameFromParam}] Sessiya yenilənir... SessionID=${req.sessionID}`);
+    // Sessionu yenilə (yeni nickname və ad ilə)
     req.session.user.nickname = updatedUser.nickname;
     req.session.user.fullName = updatedUser.full_name;
-    // Email də sessiyada saxlanılırsa, onu da yenilə: req.session.user.email = updatedUser.email;
+    console.log('[API /profile PUT] Session yenilənir...');
 
-    req.session.save((err) => {
-      if (err) { console.error(`[API PUT /profile/${currentNicknameFromParam}] Session save XƏTASI:`, err); return res.status(500).json({ message: 'Profil DB-də yeniləndi, lakin session save xətası.' }); }
-      console.log(`[API PUT /profile/${currentNicknameFromParam}] UĞURLU: Profil və Sessiya yeniləndi.`);
+    req.session.save((saveErr) => { // Save etmək vacibdir!
+      if (saveErr) {
+        console.error("[API /profile PUT] Session save xətası (profil):", saveErr);
+        // DB yeniləndi, amma session yox -> istifadəçiyə məlumat verək
+        return res.status(500).json({ message: 'Profil DB-də yeniləndi, lakin sessiya yenilənərkən xəta baş verdi. Zəhmət olmasa təkrar giriş edin.' });
+      }
+      console.log(`[API /profile PUT] UĞURLU: Profil və session yeniləndi: ${updatedUser.nickname}, SessionID: ${req.sessionID}`);
+      // Frontendə yenilənmiş user datasını (həssas olmayan) göndərək
       res.status(200).json({ message: 'Profil uğurla yeniləndi!', updatedUser: updatedUser });
     });
 
   } catch (error) {
-    console.error(`[API PUT /profile/${currentNicknameFromParam}] Gözlənilməz XƏTA:`, error);
-    if (error.code === '23505') { /* ... unique constraint xətaları ... */ }
-    res.status(500).json({ message: 'Server xətası baş verdi.' });
+    console.error("[API /profile PUT] Profil yeniləmə xətası:", error);
+    // Unique constraint xətalarını yoxla
+    if (error.code === '23505') {
+        if (error.constraint && error.constraint.includes('email')) {
+             return res.status(409).json({ message: 'Bu e-poçt artıq mövcuddur (DB).' });
+         }
+         if (error.constraint && error.constraint.includes('nickname')) {
+             return res.status(409).json({ message: 'Bu nickname artıq mövcuddur (DB).' });
+         }
+    }
+    res.status(500).json({ message: 'Server xətası.' });
   } finally {
-    if (client) { client.release(); console.log(`[API PUT /profile/${currentNicknameFromParam}] DB bağlantısı buraxıldı.`); }
+      if (client) {
+          client.release();
+          console.log('[API /profile PUT] DB bağlantısı buraxıldı.');
+      }
   }
 });
+
 
 // ----- Default Kök Route (/) -----
 app.get('/', (req, res) => {
     console.log(`[API GET /] Kök route sorğusu. SessionID=${req.sessionID}, User=${req.session.user?.nickname || 'N/A'}`);
     if (req.session && req.session.user && req.session.user.id) {
-        console.log("[API GET /] Aktiv sessiya var, oyunlara yönləndirilir.");
-        res.redirect('/OYUNLAR/oyunlar/oyunlar.html'); // Düzgün yol
+        // Giriş edilib, oyunlar səhifəsinə yönləndir
+        console.log('[API GET /] Aktiv sessiya var, oyunlara yönləndirilir.');
+        res.redirect('/OYUNLAR/oyunlar/oyunlar.html'); // Frontend faylının düzgün yolu
     } else {
-        console.log("[API GET /] Aktiv sessiya yoxdur, loginə yönləndirilir.");
-        res.redirect('/ANA SEHIFE/login/login.html'); // Düzgün yol
+        // Giriş edilməyib, login səhifəsinə yönləndir
+        console.log('[API GET /] Aktiv sessiya yoxdur, loginə yönləndirilir.');
+        res.redirect('/ANA SEHIFE/login/login.html'); // Frontend faylının düzgün yolu
     }
 });
 
-// ----- Hələlik Bu Qədər (Hissə 2) -----
-// server.js (v7 - Tam Kod + Regenerate + Ətraflı Log)
-// HİSSƏ 3/3
+
+// --- Part 2 Sonu ---
+// server.js
+// Part 3/3 - Socket.IO Logic & Server Start
+
+// ... (Part 1 və Part 2-dən sonra gələn kod) ...
 
 // ============================================
-// ===== SOCKET.IO Quraşdırması və Hadisələr ==
+// ===== SOCKET.IO HADISƏLƏRİ (EVENTS) ======
 // ============================================
-console.log("[Setup] Socket.IO konfiqurasiyası başlayır...");
+console.log('[Setup] Socket.IO konfiqurasiyası başlayır...');
 
-// Socket.IO üçün Session Middleware-i istifadə etmək
+// Socket.IO üçün Session Middleware-i istifadə etmək üçün yardımçı funksiya
 const wrap = middleware => (socket, next) => middleware(socket.request, {}, next);
+
+// Session middleware-i Socket.IO üçün də tətbiq et
 io.use(wrap(sessionMiddleware));
-console.log("[Setup] Socket.IO üçün session middleware tətbiq edildi.");
+console.log('[Setup] Socket.IO üçün session middleware tətbiq edildi.');
 
-// Socket.IO bağlantılarını yalnız giriş etmiş istifadəçilər üçün qəbul etmək (Ətraflı Logging ilə)
+// Socket.IO bağlantılarını yalnız giriş etmiş istifadəçilər üçün qəbul etmək
 io.use((socket, next) => {
-  const session = socket.request.session;
-
-  console.log('--- Socket Auth Middleware Başladı ---');
-  console.log('Socket ID:', socket.id);
-  console.log('Socket sorğusunda session varmi?', !!session);
-
-  if (session) {
-      console.log('Socket sorğusundakı Session ID:', session.id);
-      console.log('Socket sorğusunda session.user varmi?', !!session.user);
-
-      if (session.user) {
-          console.log('Socket sorğusundakı Session User Datası:', session.user);
-          if (session.user.id && session.user.nickname) { // ID və Nickname yoxlayaq
-              socket.user = session.user; // User məlumatını socket obyektinə yaz
-              console.log(`[Socket Auth] UĞURLU: User ${socket.user.nickname} (ID: ${socket.user.id}) üçün bağlantıya icazə verildi.`);
-              next(); // Bağlantıya icazə ver
-          } else {
-              console.warn('[Socket Auth] UĞURSUZ: session.user tapıldı, amma id və ya nickname əskikdir.');
-              next(new Error('Authentication error: Incomplete session data'));
-          }
-      } else {
-          console.warn('[Socket Auth] UĞURSUZ: session tapıldı, amma session.user yoxdur.');
-          next(new Error('Authentication error: User data missing in session'));
-      }
+  // Wrap edilmiş session middleware sayəsində socket.request.session mövcuddur
+  // Və biz artıq API endpointlərində req.session.user təyin etmişik
+  if (socket.request.session && socket.request.session.user && socket.request.session.user.nickname) {
+    // Session-dakı user məlumatını socket obyektinə əlavə edirik ki, asan çataq
+    socket.user = { ...socket.request.session.user }; // Kopyasını alırıq
+    console.log(`[Socket Auth] Socket üçün user təyin edildi: ${socket.user.nickname} (Socket ID: ${socket.id})`);
+    next(); // Bağlantıya icazə ver
   } else {
-      console.warn('[Socket Auth] UĞURSUZ: Socket sorğusunda session tapılmadı.');
-      next(new Error('Authentication error: No session'));
+    console.warn(`[Socket Auth] Giriş edilməmiş socket bağlantısı rədd edildi (SessionID: ${socket.request.sessionID || 'N/A'}).`);
+    // Xəta mesajını dəyişdirək ki, frontend daha yaxşı anlasın
+    next(new Error('Authentication error')); // Xəta ilə bağlantını rədd et
   }
-  console.log('--- Socket Auth Middleware Bitdi ---');
 });
+console.log('[Setup] Socket.IO üçün autentifikasiya middleware təyin edildi.');
 
-// Yeni Socket Bağlantısı Gəldikdə...
+
+// ----- Yeni Socket Bağlantısı Gəldikdə... -----
 io.on('connection', (socket) => {
-  // io.use() middleware sayəsində bura gələn socket-in 'user' məlumatı olmalıdır.
-  if (!socket.user) {
-      console.error(`!!! KRİTİK XƏTA: Autentifikasiyadan keçmiş socket üçün socket.user tapılmadı! Socket ID: ${socket.id}`);
-      socket.disconnect(true); // Bağlantını dərhal kəs
-      return;
-  }
-  console.log(`[Socket Connected] User: ${socket.user.nickname} (ID: ${socket.id}) qoşuldu.`);
+  // Artıq istifadəçinin kim olduğunu `socket.user`-dan bilirik
+  // Bu nöqtəyə çatıbsa, deməli istifadəçi giriş edib
+  console.log(`[Socket Connect] İstifadəçi qoşuldu: ${socket.user.nickname} (Socket ID: ${socket.id})`);
 
-  // Qoşulan istifadəçini yaddaşdakı 'users' obyektinə əlavə et
+  // Qoşulan istifadəçini 'users' yaddaş obyektinə əlavə edirik
+  // Əgər eyni user başqa tabdan/cihazdan qoşulursa, köhnə bağlantı disconnect olmalıdır
+  // Daha robust həll üçün user ID əsaslı mapping də olmalıdır, amma hələlik socket.id
   users[socket.id] = {
-      id: socket.id,
-      username: socket.user.nickname, // Sessiondan gələn nickname
-      currentRoom: null
+      id: socket.id, // Socket ID
+      userId: socket.user.id, // İstifadəçi ID (DB-dən)
+      username: socket.user.nickname, // İstifadəçi adı (Sessiondan)
+      currentRoom: null // Başlanğıcda heç bir otaqda deyil
   };
-  console.log(`[Socket Users] Aktiv istifadəçilər: ${Object.keys(users).length}. Yeni: ${socket.user.nickname}`);
 
-  // Qoşulan istifadəçiyə mövcud otaq siyahısını göndər
-  try {
-      const currentRoomList = Object.values(rooms).map(room => ({
-           id: room.id, name: room.name, playerCount: room.players.length, hasPassword: !!room.password, boardSize: room.boardSize, creatorUsername: room.creatorUsername,
-           player1Username: room.players[0] && users[room.players[0]] ? users[room.players[0]].username : null,
-           player2Username: room.players[1] && users[room.players[1]] ? users[room.players[1]].username : null, }));
-       socket.emit('room_list_update', currentRoomList);
-       console.log(`[Socket Emit] 'room_list_update' göndərildi ${socket.user.nickname}-ə. ${currentRoomList.length} otaq var.`);
-   } catch (emitError) { console.error(`[Socket Emit] 'room_list_update' xətası (${socket.user.nickname}):`, emitError); }
+  // Qoşulan istifadəçiyə mövcud otaq siyahısını dərhal göndər
+  // broadcastRoomList() bütün otaq siyahısını göndərəcək, amma fərdi də göndərə bilərik
+    const initialRoomList = Object.values(rooms).map(room => ({
+        id: room.id, name: room.name, playerCount: room.players.length,
+        hasPassword: !!room.password, boardSize: room.boardSize,
+        creatorUsername: room.creatorUsername,
+        player1Username: room.players[0] ? users[room.players[0]]?.username : null,
+        player2Username: room.players[1] ? users[room.players[1]]?.username : null,
+    }));
+  socket.emit('room_list_update', initialRoomList);
+  console.log(`[Socket Connect] İlkin otaq siyahısı ${socket.user.nickname}-ə göndərildi.`);
 
-  // ----- Otaq Əməliyyatları -----
+  // ----- Otaq Əməliyyatları Dinləyiciləri -----
 
   socket.on('create_room', (data) => {
+    // User məlumatı artıq socket.user-dadır
     const user = socket.user;
-    console.log(`[Socket On] 'create_room' alındı. User: ${user.nickname}, Data:`, data);
-    if (!user) { console.error("create_room: socket.user tapılmadı!"); return socket.emit('creation_error','Sessiya xətası.');}
+    const currentUserSocketInfo = users[socket.id]; // Cari socket məlumatı
+    console.log(`[Socket Event] create_room hadisəsi (${user.nickname}):`, data);
 
-    if (!data || !data.name || data.name.trim().length === 0) { console.warn(`[create_room] Keçərsiz data: Ad boşdur.`); return socket.emit('creation_error', 'Otaq adı boş ola bilməz.'); }
-    if (data.password && (data.password.length < 2 || !(/[a-zA-Z]/.test(data.password) && /\d/.test(data.password)))) { console.warn(`[create_room] Keçərsiz şifrə formatı.`); return socket.emit('creation_error', 'Şifrə tələblərə uyğun deyil.'); }
-    if (users[socket.id]?.currentRoom) { console.warn(`[create_room] User ${user.nickname} artıq ${users[socket.id].currentRoom} otağındadır.`); return socket.emit('creation_error', 'Siz artıq başqa bir otaqdasınız.'); }
+    // Validasiyalar
+    if (!data || !data.name || data.name.trim().length === 0) {
+        console.warn(`[create_room] Xəta: Otaq adı boşdur.`);
+        return socket.emit('creation_error', 'Otaq adı boş ola bilməz.');
+    }
+    if (data.password && data.password.length > 0) {
+      if (data.password.length < 2 || !(/[a-zA-Z]/.test(data.password) && /\d/.test(data.password))) {
+          console.warn(`[create_room] Xəta: Şifrə tələblərə uymur.`);
+          return socket.emit('creation_error', 'Şifrə tələblərə uyğun deyil (min 2 krk, 1 hərf+1 rəqəm).');
+      }
+    }
+    // İstifadəçinin başqa otaqda olub olmadığını yoxla
+    if (currentUserSocketInfo?.currentRoom) {
+        const existingRoomId = currentUserSocketInfo.currentRoom;
+        console.warn(`[create_room] Xəta: ${user.nickname} artıq ${existingRoomId} otağındadır.`);
+        return socket.emit('creation_error', 'Siz artıq başqa bir otaqdasınız. Yeni otaq yaratmaq üçün əvvəlcə mövcud otaqdan çıxın.');
+    }
 
     const newRoomId = generateRoomId();
-    const newRoom = { id: newRoomId, name: data.name.trim(), password: data.password || null, players: [socket.id], boardSize: parseInt(data.boardSize, 10) || 3, creatorUsername: user.nickname, gameState: null };
-    rooms[newRoomId] = newRoom;
-    users[socket.id].currentRoom = newRoomId;
-    socket.join(newRoomId);
-    console.log(`[create_room] Otaq yaradıldı: ID=${newRoomId}, Adı=${newRoom.name}, Yaradan=${user.nickname}`);
-    socket.emit('room_created', { roomId: newRoomId, roomName: newRoom.name, boardSize: newRoom.boardSize });
+    const boardSize = parseInt(data.boardSize, 10) || 3; // Default 3x3
+    const validatedBoardSize = Math.max(3, Math.min(6, boardSize)); // 3-6 arası
+
+    const newRoom = {
+      id: newRoomId,
+      name: data.name.trim().slice(0, 30), // Max 30 simvol
+      password: data.password || null,
+      players: [socket.id], // Yaradan ilk oyunçu
+      boardSize: validatedBoardSize,
+      creatorUsername: user.nickname,
+      gameState: null // Oyun başlayanda təyin olunacaq
+    };
+
+    rooms[newRoomId] = newRoom; // Yeni otağı yaddaşa əlavə et
+    if(currentUserSocketInfo) currentUserSocketInfo.currentRoom = newRoomId; // İstifadəçinin otağını təyin et
+    socket.join(newRoomId); // Socket.IO otağına qoşul (broadcast üçün)
+
+    console.log(`[create_room] Otaq yaradıldı: ID=${newRoomId}, Adı=${newRoom.name}, Yaradan=${user.nickname}, Ölçü=${newRoom.boardSize}`);
+
+    // Otağı yaradana qoşulma məlumatını göndər (eyni anda həm yaradıldı, həm qoşuldu)
     socket.emit('room_joined', { roomId: newRoomId, roomName: newRoom.name, boardSize: newRoom.boardSize });
+
+    // Bütün qoşulu clientlərə yenilənmiş otaq siyahısını göndər
     broadcastRoomList();
   });
 
   socket.on('join_room', (data) => {
     const user = socket.user;
-    console.log(`[Socket On] 'join_room' alındı. User: ${user.nickname}, Data:`, data);
-    if (!user) { console.error("join_room: socket.user tapılmadı!"); return socket.emit('join_error','Sessiya xətası.');}
-    const room = data ? rooms[data.roomId] : null;
     const currentUserSocketInfo = users[socket.id];
+    console.log(`[Socket Event] join_room hadisəsi (${user.nickname}):`, data);
 
-    if (!data || !data.roomId) { console.warn(`[join_room] Keçərsiz data: roomId yoxdur.`); return socket.emit('join_error', 'Otaq ID göndərilmədi.'); }
-    if (!room) { console.warn(`[join_room] Otaq tapılmadı: ID=${data.roomId}`); return socket.emit('join_error', 'Otaq tapılmadı.'); }
-    if (currentUserSocketInfo?.currentRoom) { console.warn(`[join_room] User ${user.nickname} artıq ${currentUserSocketInfo.currentRoom} otağındadır.`); return socket.emit('join_error', 'Siz artıq başqa bir otaqdasınız.'); }
-    if (room.players.includes(socket.id)) { console.warn(`[join_room] User ${user.nickname} artıq bu ${data.roomId} otağındadır.`); return socket.emit('join_error', 'Siz artıq bu otaqdasınız.');}
-    if (room.players.length >= 2) { console.warn(`[join_room] Otaq dolu: ID=${data.roomId}`); return socket.emit('join_error', 'Otaq doludur.'); }
-    if (room.password && room.password !== data.password) { console.warn(`[join_room] Yanlış şifrə: ID=${data.roomId}`); return socket.emit('join_error', 'Şifrə yanlışdır.'); }
+    if (!data || !data.roomId) {
+        console.warn(`[join_room] Xəta: Keçərsiz data.`);
+        return socket.emit('join_error', 'Otaq ID göndərilmədi.');
+    }
 
-    // Qoşulma
+    const room = rooms[data.roomId];
+
+    // Yoxlamalar
+    if (!room) {
+        console.warn(`[join_room] Xəta: Otaq (${data.roomId}) tapılmadı.`);
+        return socket.emit('join_error', 'Otaq tapılmadı.');
+    }
+    if (currentUserSocketInfo?.currentRoom) {
+        console.warn(`[join_room] Xəta: ${user.nickname} artıq başqa otaqdadır (${currentUserSocketInfo.currentRoom}).`);
+        return socket.emit('join_error', 'Siz artıq başqa bir otaqdasınız.');
+    }
+    if (room.players.length >= 2) {
+         console.warn(`[join_room] Xəta: Otaq (${data.roomId}) doludur.`);
+        return socket.emit('join_error', 'Otaq doludur.');
+    }
+    // Öz yaratdığı otağa təkrar qoşulmağa çalışmamasını yoxla (əgər players array-də varsa)
+    if (room.players.includes(socket.id)) {
+        console.warn(`[join_room] Xəta: ${user.nickname} artıq bu otaqdadır.`);
+        // Xəta vermək əvəzinə, sadəcə 'room_joined' göndərmək olar
+         return socket.emit('room_joined', { roomId: room.id, roomName: room.name, boardSize: room.boardSize });
+        // return socket.emit('join_error', 'Siz artıq bu otaqdasınız.');
+    }
+    if (room.password && room.password !== data.password) {
+        console.warn(`[join_room] Xəta: Otaq (${data.roomId}) üçün şifrə yanlışdır.`);
+        return socket.emit('join_error', 'Şifrə yanlışdır.');
+    }
+
+    // Otağa qoşulma
     room.players.push(socket.id);
-    if(currentUserSocketInfo) currentUserSocketInfo.currentRoom = room.id; else console.error("!!! join_room: currentUserSocketInfo tapılmadı!");
+    if(currentUserSocketInfo) currentUserSocketInfo.currentRoom = room.id;
     socket.join(room.id);
-    console.log(`[join_room] User ${user.nickname} (${socket.id}) ${room.name} (${room.id}) otağına qoşuldu.`);
+
+    console.log(`[join_room] İstifadəçi ${user.nickname} (${socket.id}) otağa qoşuldu: ${room.name} (${room.id})`);
+
+    // Qoşulan istifadəçiyə təsdiq göndər
     socket.emit('room_joined', { roomId: room.id, roomName: room.name, boardSize: room.boardSize });
 
-    // Rəqibə xəbər ver və siyahını yenilə
-    const opponentSocketId = room.players.find(id => id !== socket.id);
-    if (opponentSocketId && io.sockets.sockets.get(opponentSocketId)) {
-        console.log(`[join_room] Rəqibə (${opponentSocketId}) ${user.nickname}-in qoşulduğu bildirilir.`);
-        io.to(opponentSocketId).emit('opponent_joined', { username: user.nickname });
-    }
+    // Otaq siyahısını yenilə (playerUsernames yenilənməlidir)
     broadcastRoomList();
 
-    // Oyun başlama siqnalı (əgər 2 oyunçu varsa)
+    // --- Oyun Başlama Məntiqi (İkinci oyunçu qoşulduqda) ---
     if (room.players.length === 2) {
-        const player1 = users[room.players[0]]; const player2 = users[room.players[1]];
-        console.log(`[join_room] Otaq doldu (${room.id}). Oyun başlama siqnalları: P1=${player1?.username}, P2=${player2?.username}`);
-        // Server tərəfindən rəqib məlumatları ilə game_start göndərilir
-        if (player1 && io.sockets.sockets.get(player1.id)) { io.to(player1.id).emit('game_start', { opponentName: player2?.username || 'Rəqib', isAiOpponent: false }); }
-        if (player2 && io.sockets.sockets.get(player2.id)) { io.to(player2.id).emit('game_start', { opponentName: player1?.username || 'Rəqib', isAiOpponent: false }); }
+        console.log(`[join_room] Otaq ${room.id} doldu. Oyun başlama prosesi...`);
+        const player1SocketId = room.players[0];
+        const player2SocketId = room.players[1]; // Yeni qoşulan
+        const player1 = users[player1SocketId];
+        const player2 = users[player2SocketId]; // Yeni qoşulanın məlumatı
+
+        if (player1 && io.sockets.sockets.get(player1SocketId)) {
+            io.to(player1SocketId).emit('opponent_joined', { // Birinciyə rəqibin qoşulduğunu bildir
+                 username: player2?.username || 'Rəqib'
+            });
+            // 'game_start' burada göndərilməməlidir, çünki zər atma və simvol seçimi olacaq
+            // Əgər zər atma yoxdursa, burada 'game_start' göndərilə bilər
+             console.log(`[join_room] 'opponent_joined' ${player1.username}-ə göndərildi.`);
+        } else {
+             console.warn(`[join_room] Player 1 (${player1SocketId}) tapılmadı və ya aktiv deyil.`);
+        }
+         // İkinci oyunçuya da birinci oyunçunun adını göndərə bilərik (əgər oda_ici.js bunu gözləyirsə)
+         if (player2 && io.sockets.sockets.get(player2SocketId)) {
+              // Bura 'game_start' və ya bənzər bir hadisə əlavə etmək olar ki,
+              // ikinci oyunçu da birinci oyunçunun adını bilsin. Amma oda_ici.js URL-dən alır.
+              console.log(`[join_room] ${player2.username} qoşuldu və rəqib məlumatı ${player1?.username}-ə göndərildi.`);
+         }
     }
   });
 
   socket.on('leave_room', () => {
-    console.log(`[Socket On] 'leave_room' alındı. User: ${socket.user?.nickname || socket.id}`);
-    handleDisconnectOrLeave(socket);
+      console.log(`[Socket Event] leave_room hadisəsi (${socket.user?.nickname || socket.id})`);
+    handleDisconnectOrLeave(socket); // Otaqdan ayrılmanı idarə et
   });
 
-  // ----- Oyun Gedişləri -----
+
+  // ----- Oyun Gedişləri və Digər Oyun İçi Hadisələr -----
+
   socket.on('make_move', (data) => {
     const user = socket.user;
-    const roomId = users[socket.id]?.currentRoom;
-    if (!user) { console.error("make_move: socket.user tapılmadı!"); return; }
-    if (!data || typeof data.index !== 'number' || data.index < 0) { console.warn(`[make_move] Keçərsiz data. User: ${user.nickname}, Data:`, data); return; }
-    console.log(`[Socket On] 'make_move' alındı. User: ${user.nickname}, Room: ${roomId}, Index: ${data.index}`);
-    if (roomId && rooms[roomId] && rooms[roomId].players.includes(socket.id)) {
-      // Server tərəfi validasiyası burada olmalıdır!
-      console.log(`[make_move] Gediş ${roomId} otağına göndərilir (göndərən: ${user.nickname}).`);
-      socket.to(roomId).emit('opponent_moved', { index: data.index, player: user.nickname });
-    } else { console.warn(`[make_move] Keçərsiz otaq/user və ya user otaqda deyil.`); }
+    const currentUserSocketInfo = users[socket.id];
+    const roomId = currentUserSocketInfo?.currentRoom;
+    console.log(`[Socket Event] make_move: User=${user?.nickname}, Room=${roomId}, Data=`, data);
+
+    if (!user || !roomId || !rooms[roomId]) {
+         console.warn(`[make_move] Keçərsiz şərtlər: User=${!!user}, RoomID=${roomId}, RoomExists=${!!rooms[roomId]}`);
+         return; // Xəta mesajı göndərmək olar
+    }
+    const room = rooms[roomId];
+
+    // Sadə yoxlama: Oyunçu otağın üzvüdürmü?
+    if (!room.players.includes(socket.id)) {
+         console.warn(`[make_move] Xəta: ${user.nickname} (${socket.id}) ${roomId} otağının üzvü deyil.`);
+         return;
+    }
+
+    // Gediş məlumatlarını (index və edən oyunçu) otaqdakı DİGƏR oyunçuya göndər
+    // `socket.to(roomId)` istifadə edirik ki, özünə göndərməsin
+    // Simvolu da göndərmək faydalı ola bilər
+    socket.to(roomId).emit('opponent_moved', { index: data.index, symbol: data.symbol }); // symbol əlavə etdik
+     console.log(`[make_move] Gediş ${roomId} otağındakı rəqib(lər)ə göndərildi.`);
+
+    // Server tərəfində oyun vəziyyətini yoxlamaq/yeniləmək lazım gələrsə, burada edilir
+    // Məsələn: rooms[roomId].gameState.board[data.index] = data.symbol;
   });
 
-   // ----- Oyun Yenidən Başlatma -----
+   // Oyunun yenidən başladılması tələbi
    socket.on('request_restart', () => {
-      const roomId = users[socket.id]?.currentRoom;
-      const user = socket.user;
-      if (!user) { console.error("request_restart: socket.user tapılmadı!"); return; }
-      if (roomId && rooms[roomId]) {
-         console.log(`[Socket On] 'request_restart' alındı. Room=${roomId}, User=${user.nickname}`);
-         socket.to(roomId).emit('restart_requested', { requester: user.nickname });
-      } else { console.warn(`[request_restart] User ${user.nickname} heç bir otaqda deyil.`);}
-   });
-   socket.on('accept_restart', () => {
-       const roomId = users[socket.id]?.currentRoom;
-       const user = socket.user;
-       if (!user) { console.error("accept_restart: socket.user tapılmadı!"); return; }
-       if (roomId && rooms[roomId]) {
-           console.log(`[Socket On] 'accept_restart' alındı. Room=${roomId}, User=${user.nickname}`);
-           io.to(roomId).emit('restart_game');
-        } else { console.warn(`[accept_restart] User ${user.nickname} heç bir otaqda deyil.`);}
+        const user = socket.user;
+        const currentUserSocketInfo = users[socket.id];
+        const roomId = currentUserSocketInfo?.currentRoom;
+       if (roomId && rooms[roomId] && user) {
+           console.log(`[Socket Event] Restart tələbi: Room=${roomId}, User=${user.nickname}`);
+           // Tələbi digər oyunçuya göndər
+           socket.to(roomId).emit('restart_requested', { requester: user.nickname });
+       } else {
+           console.warn(`[request_restart] Keçərsiz şərtlər.`);
+       }
    });
 
-  // ----- Bağlantı Kəsilməsi -----
+   // Yenidən başlatma tələbinin qəbulu
+   socket.on('accept_restart', () => {
+        const user = socket.user;
+        const currentUserSocketInfo = users[socket.id];
+        const roomId = currentUserSocketInfo?.currentRoom;
+       if (roomId && rooms[roomId] && user) {
+           console.log(`[Socket Event] Restart qəbul edildi: Room=${roomId}, User=${user.nickname}`);
+           // Hər iki oyunçuya oyunu yenidən başlatma siqnalı göndər
+           io.to(roomId).emit('restart_game'); // Həm tələb edənə, həm qəbul edənə
+           // Server tərəfində oyun vəziyyətini sıfırla (əgər varsa)
+           // rooms[roomId].gameState = initializeGameState(rooms[roomId].boardSize);
+           console.log(`[accept_restart] 'restart_game' hadisəsi ${roomId} otağına göndərildi.`);
+       } else {
+            console.warn(`[accept_restart] Keçərsiz şərtlər.`);
+       }
+   });
+
+   // Zər atma nəticəsi (əgər server təsdiqi lazımdırsa) - Bu nümunədə istifadə edilmir, client-side edilir
+   // socket.on('dice_roll_result', (data) => { ... });
+
+   // Simvol seçimi nəticəsi (əgər server təsdiqi lazımdırsa) - Bu nümunədə istifadə edilmir
+   // socket.on('symbol_chosen', (data) => { ... });
+
+
+  // ----- Bağlantı Kəsildikdə -----
   socket.on('disconnect', (reason) => {
-    console.log(`[Socket Disconnected] User: ${socket.user?.nickname || socket.id} ayrıldı. Səbəb: ${reason}`);
-    handleDisconnectOrLeave(socket);
+    console.log(`[Socket Disconnect] İstifadəçi ayrıldı: ${socket.user?.nickname || socket.id}. Səbəb: ${reason}`);
+    handleDisconnectOrLeave(socket); // Bağlantı kəsilməsini idarə et
   });
 
-  // ----- Otaqdan Ayrılma / Bağlantı Kəsilmə üçün Ümumi Funksiya -----
+  // ----- Otaqdan Ayrılma / Bağlantı Kəsilmə Funksiyası -----
+  // Bu funksiya həm 'leave_room' həm də 'disconnect' üçün çağırılır
   function handleDisconnectOrLeave(socketInstance) {
-    const userSocketInfo = users[socketInstance.id];
-    if (!userSocketInfo) { console.warn(`[handleDisconnect] Ayrılan socket üçün user məlumatı tapılmadı (ID: ${socketInstance.id}).`); return; }
-    const roomId = userSocketInfo.currentRoom;
-    const username = userSocketInfo.username;
-    console.log(`[handleDisconnect] ${username} (ID: ${socketInstance.id}) emal edilir. Otaq: ${roomId || 'Yoxdur'}`);
+    const leavingUserSocketInfo = users[socketInstance.id];
+    // Əgər user artıq 'users' obyektindən silinibsə (məs. disconnect iki dəfə çağrılırsa)
+    if (!leavingUserSocketInfo) {
+         console.log(`[handleDisconnectOrLeave] İstifadəçi (${socketInstance.id}) artıq users obyektində yoxdur.`);
+         return;
+    }
+
+    const roomId = leavingUserSocketInfo.currentRoom;
+    const username = leavingUserSocketInfo.username;
+
+    console.log(`[handleDisconnectOrLeave] İstifadəçi: ${username} (${socketInstance.id}), Otaq: ${roomId || 'Yoxdur'}`);
+
+    // İstifadəçini 'users' obyektindən dərhal sil
     delete users[socketInstance.id];
-    console.log(`[handleDisconnect] User ${username} silindi. Qalan aktiv user: ${Object.keys(users).length}`);
+
+    // Əgər bir otaqda idisə, otaqdan da çıxar
     if (roomId && rooms[roomId]) {
-      console.log(`[handleDisconnect] ${username} ${roomId} otağından çıxarılır...`);
-      rooms[roomId].players = rooms[roomId].players.filter(id => id !== socketInstance.id);
+      console.log(`[handleDisconnectOrLeave] ${username} ${roomId} otağından çıxarılır...`);
       const room = rooms[roomId];
+      // Oyunçunu otağın 'players' array-indən çıxar
+      const playerIndex = room.players.indexOf(socketInstance.id);
+      if (playerIndex > -1) {
+          room.players.splice(playerIndex, 1);
+           console.log(`[handleDisconnectOrLeave] ${username} otağın oyunçularından silindi.`);
+      } else {
+           console.warn(`[handleDisconnectOrLeave] ${username} (${socketInstance.id}) ${roomId} otağının oyunçuları arasında tapılmadı?`);
+      }
+
+
+      // Əgər otaq tamamilə boş qaldısa, otağı sil
       if (room.players.length === 0) {
-        console.log(`[handleDisconnect] Otaq ${roomId} ('${room.name}') boş qaldı, silinir.`);
+        console.log(`[handleDisconnectOrLeave] Otaq ${roomId} ('${room.name}') boş qaldı və silinir.`);
         delete rooms[roomId];
       } else {
-        const remainingPlayerId = room.players[0];
-        console.log(`[handleDisconnect] Otaqda qalan: ${users[remainingPlayerId]?.username || 'Bilinmir'} (ID: ${remainingPlayerId})`);
-        if (io.sockets.sockets.get(remainingPlayerId)) {
-             io.to(remainingPlayerId).emit('opponent_left_game', { username: username });
-             console.log(`[handleDisconnect] Qalan oyunçuya (${remainingPlayerId}) ${username}-in ayrıldığı bildirildi.`);
-        } else { console.warn(`[handleDisconnect] Qalan oyunçu (${remainingPlayerId}) aktiv deyil?`); }
+        // Əgər otaqda başqa oyunçu qaldısa, ona rəqibin ayrıldığını bildir
+        const remainingPlayerId = room.players[0]; // Tək oyunçu qalıb
+         const remainingPlayerSocket = io.sockets.sockets.get(remainingPlayerId);
+        if (remainingPlayerSocket) { // Qalan oyunçu hələ də qoşuludursa
+             console.log(`[handleDisconnectOrLeave] Qalan oyunçuya (${users[remainingPlayerId]?.username}) rəqibin (${username}) ayrıldığı bildirilir.`);
+          // opponent_left yox, opponent_left_game göndərək (oyun zamanı ayrılma)
+          remainingPlayerSocket.emit('opponent_left_game', { username: username });
+          // Burada qalan oyunçunun oyun vəziyyətini də sıfırlamaq lazım ola bilər
+        } else {
+             console.warn(`[handleDisconnectOrLeave] Qalan oyunçu (${remainingPlayerId}) tapıldı amma aktiv deyil?`);
+        }
+
+        // Əgər ayrılan oyunçu otağın yaradanı idisə və başqa oyunçu qalıbsa,
+        // yaradanı dəyişdirmək məntiqli ola bilər (amma vacib deyil)
+        if (room.creatorUsername === username && room.players.length > 0) {
+             const newCreatorUsername = users[room.players[0]]?.username || 'Naməlum';
+             console.log(`[handleDisconnectOrLeave] Otaq yaradanı ${newCreatorUsername}-ə dəyişdirildi.`);
+             room.creatorUsername = newCreatorUsername;
+        }
       }
+      // Otaq siyahısını bütün clientlərə yenilə (otaq silinsə də, qalanlar yenilənməlidir)
       broadcastRoomList();
+    } else {
+      console.log(`[handleDisconnectOrLeave] ${username} heç bir otaqda deyildi, yalnız users siyahısından silindi.`);
     }
   } // handleDisconnectOrLeave sonu
 
 }); // io.on('connection', ...) sonu
-console.log("[Setup] Socket.IO 'connection' dinləyicisi təyin edildi.");
+console.log('[Setup] Socket.IO \'connection\' dinləyicisi təyin edildi.');
 
 
-// ==================================
-// ===== SERVERİN BAŞLADILMASI ======
-// ==================================
-const PORT = process.env.PORT || 3000;
+// ----- Serveri Başlatma -----
+const PORT = process.env.PORT || 3000; // Render PORT mühit dəyişənini təyin edir
 server.listen(PORT, () => {
-    console.log("========================================");
+    console.log('========================================');
     console.log(`---- Server ${PORT} portunda uğurla işə düşdü! ----`);
+    console.log(`---- Canlı Ünvan (təxmini): http://localhost:${PORT} (Render öz ünvanını verəcək) ----`);
     console.log(`---- Server Başlama Zamanı: ${new Date().toISOString()} ----`);
-    console.log("========================================");
+    console.log('========================================');
 });
 
-// ===== Gözlənilməyən Xətaları Tutmaq =====
-process.on('uncaughtException', (error, origin) => {
-  console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
-  console.error('!!! GÖZLƏNİLMƏYƏN XƏTA (Uncaught Exception) !!!');
-  console.error(`Origin: ${origin}`); console.error(error);
-  console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
-});
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
-  console.error('!!! İDARƏ OLUNMAYAN PROMISE RƏDDİ (Unhandled Rejection) !!!');
-  console.error('Səbəb:', reason);
-  console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+// ----- Serverin Düzgün Dayanması (Optional but good practice) -----
+process.on('SIGTERM', () => {
+  console.log('SIGTERM siqnalı alındı. Server bağlanır...');
+  server.close(() => {
+    console.log('HTTP server bağlandı.');
+    pool.end(() => { // DB pool-unu bağla
+      console.log('Verilənlər bazası pool-u bağlandı.');
+      process.exit(0);
+    });
+  });
 });
 
-console.log("[Setup] Server başlatma və xəta dinləyiciləri təyin edildi.");
-console.log("---- Server Başlatma Prosesi Bitdi ----");
-// ----- server.js Faylının Sonu -----
+process.on('SIGINT', () => {
+    console.log('SIGINT siqnalı alındı (Ctrl+C). Server bağlanır...');
+    server.close(() => {
+        console.log('HTTP server bağlandı.');
+        pool.end(() => {
+            console.log('Verilənlər bazası pool-u bağlandı.');
+            process.exit(0);
+        });
+    });
+});
+
+// --- Faylın Sonu ---

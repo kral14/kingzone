@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Otaq İçi - Tic Tac Toe</title>
     <link rel="stylesheet" href="oda_ici.css">
-    <link rel="stylesheet" href="dice.css">
+    <link rel="stylesheet" href="dice.css"> 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
@@ -15,7 +15,7 @@
 
     <div id="game-loading-overlay" class="game-loading-overlay visible">
          <div class="loading-animation-container">
-            <div class="container"> <div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div>
+            <div class="container"> <div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"><div class="square"><div class="square black"></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div>
          </div>
          <p class="game-loading-text">Zəhmət olmasa gözləyin, otaq yüklənir...</p>
     </div>
@@ -26,10 +26,12 @@
             <div class="header-buttons">
                  <button id="edit-room-btn" class="button icon-button" title="Otaq Ayarları" style="display: none;"><i class="fas fa-cog"></i></button>
                  <button id="call-snow-btn" class="button primary-button" title="Yapay Zeka ilə Oyna" style="display: none;"><i class="fas fa-robot"></i> SNOW'u Çağır</button>
+                 <button id="remove-snow-btn" class="button danger-button icon-button" title="SNOW'u Çıxart" style="display: none;"><i class="fas fa-user-times"></i></button> 
                  <button id="kick-opponent-btn" class="button danger-button icon-button" title="Rəqibi Çıxart" style="display: none;"><i class="fas fa-user-slash"></i></button>
                  <button id="leave-room-btn" class="button danger-button">Otaqdan Ayrıl</button>
             </div>
         </header>
+        
         <div class="game-info">
              <div class="player-info" id="player-x-info">
                  <span class="player-symbol" id="player-x-symbol">?</span>
@@ -41,6 +43,7 @@
                   <span class="player-name" id="player-o-name">Rəqib</span>
              </div>
         </div>
+
         <div class="game-board-container">
             <div class="game-board" id="game-board" style="pointer-events: none; opacity: 0.5;">
                 </div>
@@ -49,6 +52,7 @@
                  <button id="restart-game-btn" class="button secondary-button" disabled><i class="fas fa-redo"></i> Yenidən Başlat</button>
             </div>
         </div>
+
         <footer><p>Tic Tac Toe - Otaq İçi</p></footer>
     </div>
 
@@ -67,23 +71,44 @@
             </div>
         </div>
     </div>
+
     <div id="dice-roll-modal" class="modal dice-modal">
          <div class="modal-content">
             <div class="modal-body">
                 <div class="instructions" id="dice-instructions">Rəqib gözlənilir...</div>
-                <div class="table-surface"> <div class="scene" id="dice-scene"> <div class="cube" id="dice-cube"> <div class="cube__face cube__face--front cube__face--1"><span class="dot"></span></div> <div class="cube__face cube__face--back cube__face--6"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> <div class="cube__face cube__face--right cube__face--3"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> <div class="cube__face cube__face--left cube__face--4"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> <div class="cube__face cube__face--top cube__face--2"><span class="dot"></span><span class="dot"></span></div> <div class="cube__face cube__face--bottom cube__face--5"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> </div> </div> </div>
-                <div class="dice-results-area"> <div class="result-box" id="your-roll-box"> <span class="label">Sizin Zər</span> <span class="value" id="your-roll-result">?</span> </div> <div class="result-box" id="opponent-roll-box"> <span class="label">Rəqibin Zəri</span> <span class="value" id="opponent-roll-result">?</span> </div> </div>
+                <div class="table-surface"> 
+                    <div class="scene" id="dice-scene"> 
+                        <div class="cube" id="dice-cube"> 
+                            <div class="cube__face cube__face--front cube__face--1"><span class="dot"></span></div> 
+                            <div class="cube__face cube__face--back cube__face--6"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> 
+                            <div class="cube__face cube__face--right cube__face--3"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> 
+                            <div class="cube__face cube__face--left cube__face--4"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> 
+                            <div class="cube__face cube__face--top cube__face--2"><span class="dot"></span><span class="dot"></span></div> 
+                            <div class="cube__face cube__face--bottom cube__face--5"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> 
+                        </div> 
+                    </div> 
+                </div>
+                <div class="dice-results-area"> 
+                    <div class="result-box" id="your-roll-box"> <span class="label">Sizin Zər</span> <span class="value" id="your-roll-result">?</span> </div> 
+                    <div class="result-box" id="opponent-roll-box"> <span class="label">Rəqibin Zəri</span> <span class="value" id="opponent-roll-result">?</span> </div> 
+                </div>
             </div>
         </div>
     </div>
+
     <div id="symbol-select-modal" class="modal symbol-select-modal">
           <div class="modal-content">
-             <h3 id="symbol-select-title">Simvol Seçin</h3> <p id="symbol-select-message">Oyuna başlamaq üçün simvolunuzu seçin:</p> <div class="symbol-options"> <button class="symbol-button symbol-x" data-symbol="X">X</button> <button class="symbol-button symbol-o" data-symbol="O">O</button> </div> <p id="symbol-waiting-message" class="waiting-message" style="display: none;">Rəqib simvol seçir...</p>
+             <h3 id="symbol-select-title">Simvol Seçin</h3> 
+             <p id="symbol-select-message">Oyuna başlamaq üçün simvolunuzu seçin:</p> 
+             <div class="symbol-options"> 
+                 <button class="symbol-button symbol-x" data-symbol="X">X</button> 
+                 <button class="symbol-button symbol-o" data-symbol="O">O</button> 
+             </div> 
+             <p id="symbol-waiting-message" class="waiting-message" style="display: none;">Rəqib simvol seçir...</p>
          </div>
      </div>
 
-     <script src="/socket.io/socket.io.js"></script>
-
-     <script src="oda_ici.js"></script>
+     <script src="/socket.io/socket.io.js"></script> 
+     <script src="oda_ici.js"></script> 
      </body>
 </html>

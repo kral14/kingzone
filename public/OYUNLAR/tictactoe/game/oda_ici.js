@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // console.log('--> callSnowBtn:', callSnowBtn);
         const showEdit = !isPlayingAgainstAI && isCurrentUserCreator;
         const showKick = !isPlayingAgainstAI && isCurrentUserCreator && isOpponentPresent;
-        const showCallSnow = false; // Bu düyməni ümumiyyətlə gizlədirik
+        const showCallSnow = isCurrentUserCreator && !isOpponentPresent && !isPlayingAgainstAI;
         if (editRoomBtn) { editRoomBtn.style.display = showEdit ? 'inline-flex' : 'none'; } else { /*console.warn("updateHeaderButtonsVisibility: editRoomBtn null idi!");*/ }
         if (kickOpponentBtn) { kickOpponentBtn.style.display = showKick ? 'inline-flex' : 'none'; } else { /*console.warn("updateHeaderButtonsVisibility: kickOpponentBtn null idi!");*/ }
         if (callSnowBtn) { callSnowBtn.style.display = showCallSnow ? 'inline-flex' : 'none'; } else { /*console.warn("updateHeaderButtonsVisibility: callSnowBtn null idi!");*/ }

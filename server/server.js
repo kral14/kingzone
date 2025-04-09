@@ -690,62 +690,90 @@ io.on('connection', (socket) => {
     handleDisconnectOrLeave(socket);
   });
 
-  // ----- Otaqdan Ayrılma / Bağlantı Kəsilmə Funksiyası -----
+  // ----- Otaqdan Ayrılma / Bağlantı Kəsilmə Funksiyası (Yenilənmiş) -----
   function handleDisconnectOrLeave(socketInstance) {
     const socketId = socketInstance.id;
-    const leavingUserInfo = socketInstance.user || users[socketId];
 
-    if (!leavingUserInfo || !leavingUserInfo.username) {
-        if(users[socketId]) delete users[socketId];
-        console.warn(`[handleDisconnectOrLeave] Ayrılan istifadəçi məlumatları tapılmadı (Socket ID: ${socketId}).`);
-        return;
+    // --- İstifadəçinin hələ də 'users' obyektində olub olmadığını yoxla ---
+    if (!users[socketId]) {
+        console.warn(`[handleDisconnectOrLeave] İstifadəçi ${socketId} artıq emal edilib və ya 'users' obyektində tapılmadı. Keçilir.`);
+        return; // Artıq emal edilib və ya istifadəçi heç vaxt tam qeydə alınmayıb
     }
 
+    const leavingUserInfo = users[socketId]; // İstifadəçi məlumatını silməzdən *əvvəl* alaq
     const username = leavingUserInfo.username;
-    const roomId = users[socketId]?.currentRoom || leavingUserInfo.currentRoom;
+    const roomId = leavingUserInfo.currentRoom;
 
-    console.log(`[handleDisconnectOrLeave] İstifadəçi: ${username} (${socketId}), Otaq: ${roomId || 'Yoxdur'}`);
-    if (users[socketId]) delete users[socketId];
+    console.log(`[handleDisconnectOrLeave] Emal edilir: ${username} (${socketId}), Otaq: ${roomId || 'Yoxdur'}`);
 
+    // --- ƏVVƏLCƏ istifadəçini otaqdan silək ---
+    let roomExisted = false;
+    let playerWasInRoom = false;
     if (roomId && rooms[roomId]) {
-      const room = rooms[roomId];
-      const playerIndex = room.players.indexOf(socketId);
+        roomExisted = true;
+        const room = rooms[roomId];
+        const playerIndex = room.players.indexOf(socketId);
 
-      if (playerIndex > -1) {
-        room.players.splice(playerIndex, 1);
-        console.log(`[handleDisconnectOrLeave] ${username} otaqdan silindi. Qalan: ${room.players.length}`);
+        if (playerIndex > -1) {
+            playerWasInRoom = true;
+            room.players.splice(playerIndex, 1); // Oyunçunu sil
+            console.log(`[handleDisconnectOrLeave] ${username} otaqdan (${roomId}) silindi. Qalan oyunçu sayı: ${room.players.length}`);
 
-        if (room.players.length === 0 && !room.isAiRoom) {
-            if (room.deleteTimeout) { clearTimeout(room.deleteTimeout); }
-            const deletionDelay = 300000; // 5 dəqiqə
-            console.log(`[handleDisconnectOrLeave] Otaq ${roomId} boş qaldı. ${deletionDelay / 60000} dəq. sonra silinəcək.`);
-            room.deleteTimeout = setTimeout(() => {
-                if (rooms[roomId] && rooms[roomId].players.length === 0) {
-                    console.log(`[handleDisconnectOrLeave] Otaq ${roomId} silinir.`);
-                    delete rooms[roomId];
-                    broadcastRoomList();
-                } else {
-                    console.log(`[handleDisconnectOrLeave] Otaq ${roomId} silinmədi.`);
-                    if(rooms[roomId]) delete rooms[roomId].deleteTimeout;
+            // Qalan oyunçunu məlumatlandır (əgər varsa)
+            if (room.players.length === 1) {
+                const remainingPlayerId = room.players[0];
+                const remainingPlayerSocket = io.sockets.sockets.get(remainingPlayerId);
+                if (remainingPlayerSocket) {
+                    console.log(`[handleDisconnectOrLeave] Qalan oyunçuya (${users[remainingPlayerId]?.username}) ${username}-in ayrıldığı bildirilir.`);
+                    remainingPlayerSocket.emit('opponent_left_game', { username: username });
                 }
-            }, deletionDelay);
-        } else if (room.players.length === 1) {
-            const remainingPlayerId = room.players[0];
-            const remainingPlayerSocket = io.sockets.sockets.get(remainingPlayerId);
-            if (remainingPlayerSocket) {
-                remainingPlayerSocket.emit('opponent_left_game', { username: username });
+                // Lazım gələrsə, yaradanı yenilə
+                if (room.creatorUsername === username) {
+                    room.creatorUsername = users[remainingPlayerId]?.username || 'Naməlum';
+                    console.log(`[handleDisconnectOrLeave] Otaq (${roomId}) yaradanı ${room.creatorUsername}-ə dəyişdi.`);
+                }
             }
-            if (room.creatorUsername === username) {
-                room.creatorUsername = users[remainingPlayerId]?.username || 'Naməlum';
-                console.log(`[handleDisconnectOrLeave] Yaradan ${room.creatorUsername}-ə dəyişdi.`);
+
+            // Boş qalan otağın silinməsi üçün timeout təyin et
+            if (room.players.length === 0 && !room.isAiRoom) {
+                if (room.deleteTimeout) clearTimeout(room.deleteTimeout); // Köhnə timeout-u ləğv et
+                const deletionDelay = 300000; // 5 dəqiqə
+                console.log(`[handleDisconnectOrLeave] Otaq ${roomId} boş qaldı. ${deletionDelay / 60000} dəqiqə sonra silinməsi planlaşdırılır.`);
+                room.deleteTimeout = setTimeout(() => {
+                    // Timeout işə düşəndə yenidən yoxla (bəlkə kimsə qoşulub)
+                    if (rooms[roomId] && rooms[roomId].players.length === 0) {
+                        console.log(`[handleDisconnectOrLeave] Boş otaq ${roomId} silinir.`);
+                        delete rooms[roomId];
+                        broadcastRoomList(); // Silindikdən sonra siyahını yenilə
+                    } else {
+                         console.log(`[handleDisconnectOrLeave] Otağın (${roomId}) silinməsi ləğv edildi (oyunçu qoşuldu?).`);
+                         if (rooms[roomId]) delete rooms[roomId].deleteTimeout; // Timeout ID-ni sil
+                    }
+                }, deletionDelay);
             }
+        } else {
+            // Bu hal o zaman baş verə bilər ki, user.currentRoom dolu olsun, amma players massivində ID tapılmasın (nadirdir)
+            console.warn(`[handleDisconnectOrLeave] ${username} (${socketId}) ${roomId} otağının oyunçu siyahısında tapılmadı, amma user state-də bu otaqda olduğu göstərilirdi.`);
         }
-        broadcastRoomList();
-      } else {
-        console.warn(`[handleDisconnectOrLeave] ${username} (${socketId}) ${roomId} otağında tapılmadı?`);
-        broadcastRoomList();
-      }
     }
+
+    // --- SONRA istifadəçini qlobal 'users' obyektindən silək ---
+    // Artıq if(!users[socketId]) yoxlaması yuxarıda olduğu üçün burada birbaşa silə bilərik.
+    delete users[socketId];
+    console.log(`[handleDisconnectOrLeave] İstifadəçi ${username} (${socketId}) 'users' obyektindən silindi.`);
+
+    // --- Otaq siyahısını YALNIZ otaq mövcud idisə və oyunçu həqiqətən içində idisə göndərək ---
+    // Otaq boşalsa belə, oyunçu sayı dəyişdiyi üçün siyahını dərhal yeniləmək lazımdır.
+    if (roomExisted && playerWasInRoom) {
+         console.log(`[handleDisconnectOrLeave] ${username} ${roomId} otağından çıxdıqdan sonra otaq siyahısı göndərilir.`);
+         broadcastRoomList();
+    } else if (roomExisted && !playerWasInRoom) {
+         // Əgər user state otaqda olduğunu desə də, siyahıda tapılmasa, yenə də göndərək (ehtiyat üçün)
+         console.warn(`[handleDisconnectOrLeave] Oyunçu otaq massivində olmasa da, siyahı göndərilir (state uyğunsuzluğu?).`);
+         broadcastRoomList();
+    }
+    // İstifadəçi heç bir mövcud otaqla əlaqəli deyildisə, siyahını göndərməyə ehtiyac yoxdur.
+
   } // handleDisconnectOrLeave sonu
 
 }); // <<<--- io.on('connection', ...) blokunun bağlanması

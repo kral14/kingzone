@@ -1,5 +1,5 @@
 // server.js (PostgreSQL + DB Session Store ilə Tam Yenilənmiş v4.1)
-// Part 1/3 - Setup and Middleware (TAM KOD)
+// Part 1/4 - Setup, Middleware, Helpers (TAM KOD)
 
 // ---- Əsas Modulların Import Edilməsi ----
 require('dotenv').config();
@@ -120,7 +120,7 @@ function broadcastRoomList() {
             .map(room => ({
                 id: room.id,
                 name: room.name,
-                playerCount: room.players.length,
+                playerCount: room.players.length, // Client tərəfi AI üçün bunu interpretasiya edəcək
                 hasPassword: !!room.password,
                 boardSize: room.boardSize,
                 creatorUsername: room.creatorUsername,
@@ -148,14 +148,14 @@ function createDefaultRooms() {
     defaultRoomsData.forEach(roomData => {
         const exists = Object.values(rooms).some(room => room.name === roomData.name && room.isAiRoom);
         if (!exists) {
-            const roomId = `ai_${generateRoomId()}`;
+            const roomId = `ai_${generateRoomId()}`; // AI otaq ID-lərini fərqləndirək
             rooms[roomId] = {
                 id: roomId,
                 name: roomData.name,
                 password: null,
-                players: [],
+                players: [], // AI otağında real oyunçu saxlanılmır (yalnız lobidə göstərmək üçündür)
                 boardSize: roomData.size,
-                creatorUsername: "SNOW",
+                creatorUsername: "SNOW", // Rəmzi yaradan
                 gameState: null,
                 isAiRoom: roomData.isAi
             };
@@ -171,7 +171,7 @@ function createDefaultRooms() {
 
 // --- Part 1 Sonu ---
 // server.js (PostgreSQL + DB Session Store ilə Tam Yenilənmiş v4.1)
-// Part 2/3 - HTTP API Routes (TAM KOD)
+// Part 2/4 - HTTP API Routes (Register, Login, Logout, Check-Auth) (TAM KOD)
 
 // ... (Part 1-dən sonra gələn kod: require-lar, setup, middleware-lər, yardımçı funksiyalar) ...
 
@@ -205,7 +205,9 @@ app.post('/register', async (req, res) => {
     // Şifrəni hashla
     console.log(`[API /register] ${nickname} üçün şifrə hashlanır...`);
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-    const newUserId = Date.now().toString(); // Və ya DB SERIAL
+    // ID üçün daha yaxşı bir üsul istifadə edin (məsələn, UUID və ya DB SERIAL)
+    // Bu sadəcə bir nümunədir və toqquşmalara səbəb ola bilər!
+    const newUserId = Date.now().toString() + Math.random().toString(36).substring(2, 7); // Daha unikal etməyə çalışaq
 
     // İstifadəçini DB-yə əlavə et
     const insertQuery = `INSERT INTO users (id, full_name, email, nickname, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id, nickname;`;
@@ -226,6 +228,7 @@ app.post('/register', async (req, res) => {
             return res.status(409).json({ message: 'Bu nickname artıq mövcuddur (DB).' });
        }
     }
+    // Cavab göndərilməyibsə, ümumi server xətası göndər
     if (!res.headersSent) {
         res.status(500).json({ message: 'Server xətası baş verdi.' });
     }
@@ -251,6 +254,7 @@ app.post('/login', async (req, res) => {
         client = await pool.connect();
         console.log(`[API /login] DB bağlantısı alındı.`);
 
+        // İstifadəçini tap (nickname case-insensitive)
         const result = await client.query('SELECT * FROM users WHERE LOWER(nickname) = LOWER($1)', [nickname]);
         if (result.rowCount === 0) {
             console.log(`[API /login] İstifadəçi tapılmadı: ${nickname}`);
@@ -259,6 +263,7 @@ app.post('/login', async (req, res) => {
         const user = result.rows[0];
         console.log(`[API /login] İstifadəçi tapıldı: ${user.nickname} (ID: ${user.id})`);
 
+        // Şifrəni yoxla
         console.log(`[API /login] Şifrə yoxlanılır...`);
         const isPasswordCorrect = await bcrypt.compare(password, user.password_hash);
         if (!isPasswordCorrect) {
@@ -267,6 +272,7 @@ app.post('/login', async (req, res) => {
         }
         console.log(`[API /login] Şifrə doğrudur: ${nickname}`);
 
+        // Session hijacking qarşısını almaq üçün session regenerate et
         const oldSessionID = req.sessionID;
         console.log(`[API /login] Session regenerate edilir... Köhnə ID=${oldSessionID}`);
 
@@ -276,21 +282,23 @@ app.post('/login', async (req, res) => {
                 if (!res.headersSent) {
                    return res.status(500).json({ message: 'Session yaradılarkən xəta baş verdi (regenerate).' });
                 }
+                // Əgər cavab artıq göndərilibsə, sadəcə log yazırıq
                 return console.error("[API /login] Regenerate xətası oldu amma cavab artıq göndərilmişdi.");
             }
 
             const newSessionID = req.sessionID;
             console.log(`[API /login] Yeni SessionID=${newSessionID}. User datası təyin edilir...`);
 
-            // Session-a yalnız lazım olan məlumatları yazaq (şifrəni deyil!)
+            // Session-a yalnız lazım olan məlumatları yazırıq (şifrə hash-ı DEYİL!)
             req.session.user = {
                 id: user.id,
                 nickname: user.nickname,
                 fullName: user.full_name,
-                email: user.email // E-poçtu da əlavə edək, profil üçün lazım ola bilər
+                email: user.email // Email-i də sessiyaya əlavə edək
             };
             console.log(`[API /login] req.session.user təyin edildi:`, JSON.stringify(req.session.user));
 
+            // Session-u yadda saxla (DB-yə yazmaq üçün)
             req.session.save(saveErr => {
                 if (saveErr) {
                     console.error("[API /login] Session save xətası:", saveErr);
@@ -300,6 +308,7 @@ app.post('/login', async (req, res) => {
                      return console.error("[API /login] Save xətası oldu amma cavab artıq göndərilmişdi.");
                 }
 
+                // Uğurlu giriş cavabını göndər
                 console.log(`[API /login] UĞURLU: Session saxlandı. User: ${req.session.user?.nickname}, SessionID: ${req.sessionID}`);
                  if (!res.headersSent) {
                        res.status(200).json({ message: 'Giriş uğurlu!', nickname: user.nickname });
@@ -315,6 +324,7 @@ app.post('/login', async (req, res) => {
                res.status(500).json({ message: 'Server xətası.' });
          }
     } finally {
+        // Bağlantını pool-a qaytar
         if (client) {
             client.release();
             console.log(`[API /login] DB bağlantısı buraxıldı.`);
@@ -324,20 +334,22 @@ app.post('/login', async (req, res) => {
 
 // ----- Çıxış Endpoint-i (/logout) -----
 app.post('/logout', (req, res) => {
-  if (req.session.user) {
+  if (req.session.user) { // Yalnız giriş etmiş istifadəçi üçün
     const nickname = req.session.user.nickname;
     console.log(`[API /logout] Çıxış tələbi: ${nickname}, SessionID: ${req.sessionID}`);
+    // Session-u məhv et
     req.session.destroy(err => {
       if (err) {
         console.error("[API /logout] Session destroy xətası:", err);
         return res.status(500).json({ message: "Çıxış zamanı xəta baş verdi." });
       }
-      // Cookie adını dəqiq yazın (əgər fərqlidirsə)
-      res.clearCookie('connect.sid');
+      // Client tərəfdəki session cookie-ni təmizlə (adını düzgün yazmaq vacibdir)
+      res.clearCookie('connect.sid'); // Express-session üçün standart ad budur
       console.log(`[API /logout] İstifadəçi çıxdı: ${nickname}. Session məhv edildi.`);
       res.status(200).json({ message: "Uğurla çıxış edildi." });
     });
   } else {
+    // Giriş edilməyibsə, xəta qaytar
     console.log(`[API /logout] Aktiv session yox idi.`);
     res.status(400).json({ message: "Giriş edilməyib." });
   }
@@ -345,19 +357,23 @@ app.post('/logout', (req, res) => {
 
 // ----- Autentifikasiya Vəziyyətini Yoxlama Endpoint-i (/check-auth) -----
 app.get('/check-auth', (req, res) => {
-  // console.log(`--- /check-auth sorğusu gəldi --- Session ID: ${req.sessionID}`);
-  // console.log(`Server req.session görür mü? ${!!req.session}`);
-  // console.log(`Server req.session.user görür mü? ${!!req.session?.user}`, req.session?.user ? `(${JSON.stringify(req.session.user)})` : '');
+  // console.log(`--- /check-auth sorğusu gəldi --- Session ID: ${req.sessionID}`); // Logları azaltmaq üçün kommentə alına bilər
   if (req.session && req.session.user && req.session.user.id) {
+    // Aktiv sessiya varsa, istifadəçi məlumatlarını qaytar
     // console.log(`[/check-auth] Cavab: Uğurlu. User: ${req.session.user.nickname}, SessionID=${req.sessionID}`);
-    // Cavaba user datasını tam şəkildə əlavə edirik
     res.status(200).json({ loggedIn: true, user: req.session.user });
   } else {
-    // console.log('Server session/user tapa bilmir!');
+    // Aktiv sessiya yoxdursa
+    // console.log('[/check-auth] Server session/user tapa bilmir!');
     res.status(401).json({ loggedIn: false, message: 'Sessiya tapılmadı və ya etibarsızdır.' });
   }
 });
 
+// --- Part 2 Sonu ---
+// server.js (PostgreSQL + DB Session Store ilə Tam Yenilənmiş v4.1)
+// Part 3/4 - Profile API Routes, Root Route, Socket.IO Setup (TAM KOD)
+
+// ... (Part 1 və Part 2-dən sonra gələn kod) ...
 
 // ----- Profil Məlumatlarını Almaq Endpoint-i (/profile/:nickname) -----
 // Qeyd: Bu endpoint hazırda birbaşa istifadə edilmir, çünki /check-auth
@@ -482,16 +498,76 @@ app.get('/', (req, res) => {
     // console.log(`[API GET /] Kök route sorğusu. SessionID=${req.sessionID}, User=${req.session.user?.nickname || 'N/A'}`);
     if (req.session && req.session.user && req.session.user.id) {
         // console.log('[API GET /] Aktiv sessiya var, oyunlara yönləndirilir.');
+        // Frontend faylının düzgün yolunu göstərdiyinizdən əmin olun
         res.redirect('/OYUNLAR/oyunlar/oyunlar.html');
     } else {
         // console.log('[API GET /] Aktiv sessiya yoxdur, loginə yönləndirilir.');
+        // Frontend faylının düzgün yolunu göstərdiyinizdən əmin olun
         res.redirect('/ANA SEHIFE/login/login.html');
     }
 });
 
-// --- Part 2 Sonu ---
+
+// ============================================
+// ===== SOCKET.IO HADISƏLƏRİ (EVENTS) ======
+// ============================================
+console.log('[Setup] Socket.IO konfiqurasiyası başlayır...');
+
+// Socket.IO üçün Session Middleware-i istifadə etmək üçün yardımçı funksiya
+const wrap = middleware => (socket, next) => middleware(socket.request, {}, next);
+
+// Session middleware-i Socket.IO üçün tətbiq et
+io.use(wrap(sessionMiddleware));
+console.log('[Setup] Socket.IO üçün session middleware tətbiq edildi.');
+
+// Socket.IO bağlantılarını yalnız giriş etmiş istifadəçilər üçün qəbul et
+io.use((socket, next) => {
+  if (socket.request.session && socket.request.session.user && socket.request.session.user.nickname) {
+    socket.user = { ...socket.request.session.user }; // Sessiyadan user məlumatını socket obyektinə kopyala
+    console.log(`[Socket Auth] Socket üçün user təyin edildi: ${socket.user.nickname} (Socket ID: ${socket.id})`);
+    next(); // İcazə verildi
+  } else {
+    console.warn(`[Socket Auth] Giriş edilməmiş socket bağlantısı rədd edildi (SessionID: ${socket.request.sessionID || 'N/A'}).`);
+    next(new Error('Authentication error')); // Xəta ilə bağlantını rədd et
+  }
+});
+console.log('[Setup] Socket.IO üçün autentifikasiya middleware təyin edildi.');
+
+
+// ----- Yeni Socket Bağlantısı Gəldikdə... -----
+io.on('connection', (socket) => {
+  console.log(`[Socket Connect] İstifadəçi qoşuldu: ${socket.user.nickname} (Socket ID: ${socket.id})`);
+
+  // İstifadəçini 'users' yaddaş obyektinə əlavə et
+  users[socket.id] = {
+      id: socket.id,
+      userId: socket.user.id, // DB-dən gələn user ID
+      username: socket.user.nickname,
+      currentRoom: null // Başlanğıcda heç bir otaqda deyil
+  };
+
+  // Qoşulan istifadəçiyə otaq siyahısını göndər (Lobidədirsə)
+  try {
+      const initialRoomList = Object.values(rooms).map(room => ({
+            id: room.id, name: room.name, playerCount: room.players.length,
+            hasPassword: !!room.password, boardSize: room.boardSize,
+            creatorUsername: room.creatorUsername,
+            player1Username: room.players[0] ? users[room.players[0]]?.username : null,
+            player2Username: room.players[1] ? users[room.players[1]]?.username : null,
+            isAiRoom: !!room.isAiRoom
+       }));
+      socket.emit('room_list_update', initialRoomList);
+      // console.log(`[Socket Connect] İlkin otaq siyahısı ${socket.user.nickname}-ə göndərildi (${initialRoomList.length} otaq).`);
+  } catch (listError) {
+      console.error("[Socket Connect] İlkin otaq siyahısı göndərilərkən xəta:", listError);
+      socket.emit('room_list_update', []);
+  }
+
+  // --- Socket Hadisə Dinləyiciləri (Part 4-də davam edəcək) ---
+
+// --- Part 3 Sonu (io.on('connection', ...) bloku Part 4-də bağlanacaq) ---
 // server.js (PostgreSQL + DB Session Store ilə Tam Yenilənmiş v4.1)
-// Part 3/3 - Socket.IO Logic & Server Start (TAM KOD - QISALTMA YOXDUR)
+// Part 3/3 - Socket.IO Logic & Server Start (TAM KOD)
 
 // ... (Part 1 və Part 2-dən sonra gələn kod: require-lar, setup, API routes) ...
 
@@ -654,7 +730,6 @@ io.on('connection', (socket) => {
          } else {
              console.warn(`[join_room] Birinci oyunçu (${player1SocketId}) tapılmadı və ya socketi yoxdur.`);
          }
-
          // İkinci (yeni qoşulan) oyunçuya birinci oyunçunun məlumatını göndər
          if (player1Info) {
               console.log(`---> ${player2Info?.username}-ə ${player1Info.username}-in otaqda olduğu bildirilir.`);
@@ -705,7 +780,7 @@ io.on('connection', (socket) => {
   });
 
 
-    // <<< player_ready_in_room hadisəsi BURADADIR >>>
+    // <<< player_ready_in_room dinləyicisi BURADADIR >>>
     socket.on('player_ready_in_room', (data) => {
         const user = socket.user;
         const currentUserSocketInfo = users[socket.id];
@@ -730,7 +805,7 @@ io.on('connection', (socket) => {
              currentUserSocketInfo.currentRoom = roomId;
 
              let opponentUsername = null;
-             if (room.players.length >= 1) { // >= 1 olmalıdır, çünki bu user özü də players içində ola bilər
+             if (room.players.length >= 1) {
                  const opponentSocketId = room.players.find(pId => pId !== socket.id);
                  if (opponentSocketId && users[opponentSocketId]) {
                      opponentUsername = users[opponentSocketId].username;
@@ -810,7 +885,7 @@ io.on('connection', (socket) => {
    });
 
    socket.on('kick_opponent', (data) => {
-        const user = socket.user;
+        const user = socket.user; // Kicken user
         const roomId = data?.roomId;
         console.log(`[Socket Event] kick_opponent (${user?.nickname}) Otaq: ${roomId}`);
 
@@ -825,7 +900,6 @@ io.on('connection', (socket) => {
                  kickedSocket.leave(roomId);
                  console.log(`${users[playerToKickId]?.username} (${playerToKickId}) otaqdan çıxarıldı.`);
             }
-            // handleDisconnectOrLeave qovulan istifadəçi üçün çağırılır
             handleDisconnectOrLeave({ id: playerToKickId, user: users[playerToKickId] });
         } else {
             console.warn("Kick: Rəqib tapılmadı.");
@@ -846,7 +920,6 @@ io.on('connection', (socket) => {
     const leavingUserInfo = users[socketId] || socketInstance.user;
 
     if (!leavingUserInfo || !leavingUserInfo.username) {
-         // console.log(`[handleDisconnectOrLeave] İstifadəçi (${socketId}) tapılmadı/çıxarılıb.`);
          if(users[socketId]) delete users[socketId];
          return;
     }
@@ -892,13 +965,31 @@ server.listen(PORT, () => {
     console.log(`---- Server ${PORT} portunda uğurla işə düşdü! ----`);
     console.log(`---- Canlı Ünvan (təxmini): http://localhost:${PORT} (Render öz URL-ini təqdim edəcək) ----`);
     console.log(`---- Server Başlama Zamanı: ${startTime} ----`);
-    createDefaultRooms();
+    createDefaultRooms(); // Standart AI otaqlarını server başladığında yarat
     console.log('=======================================================');
 });
 
 // ----- Serverin Düzgün Dayanması -----
-function gracefulShutdown(signal) { console.log(`\n${signal} siqnalı alındı...`); io.close(() => { console.log('[Shutdown] Socketlər bağlandı.'); server.close(() => { console.log('[Shutdown] HTTP server bağlandı.'); pool.end(() => { console.log('[Shutdown] DB pool bağlandı.'); process.exit(0); }); }); }); setTimeout(() => { console.error('[Shutdown] Timeout! Zorla çıxılır.'); process.exit(1); }, 10000); };
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+function gracefulShutdown(signal) {
+    console.log(`\n${signal} siqnalı alındı. Server bağlanır...`);
+    io.close(() => {
+        console.log('[Shutdown] Bütün socket bağlantıları bağlandı.');
+        server.close(() => {
+          console.log('[Shutdown] HTTP server bağlandı.');
+          pool.end(() => {
+            console.log('[Shutdown] PostgreSQL bağlantı pool-u bağlandı.');
+            process.exit(0); // Uğurla çıx
+          });
+        });
+    });
+
+    // Müəyyən müddət ərzində bağlanmazsa, zorla çıx
+    setTimeout(() => {
+        console.error('[Shutdown] Graceful shutdown vaxtı bitdi, proses zorla dayandırılır.');
+        process.exit(1);
+    }, 10000); // 10 saniyə gözlə
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM')); // Render.com kimi platformalar üçün
+process.on('SIGINT', () => gracefulShutdown('SIGINT')); // Ctrl+C üçün
 
 // --- Faylın Sonu ---

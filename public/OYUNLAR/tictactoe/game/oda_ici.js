@@ -568,3 +568,649 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
     // --- Hissə 2 Sonu ---
+    // public/OYUNLAR/tictactoe/game/oda_ici.js
+// Version: v2 - Socket.IO İnteqrasiyası + AI URL Parametri - Hissə 3/4
+
+// ---- DOMContentLoaded içində davam edirik (Hissə 2-dən) ----
+
+    // ---- Zər Funksiyaları (Socket.IO ilə) ----
+
+    // Zər modalını mübarizə üçün ayarlayır
+    function setupDiceModalForRollOff() {
+        // ... (əvvəlki kod kimi - vizual ayarlamalar) ...
+        if (isDiceRolling) return;
+        console.log("[setupDiceModalForRollOff] Zər modalı mübarizə üçün ayarlanır.");
+        if (diceInstructions) {
+             // Rəqib qoşulmayıbsa (hələlik), gözləmə mesajı
+             const instructionText = isOpponentPresent ? 'Başlayanı təyin etmək üçün zərə klikləyin və ya sürükləyin.' : 'Rəqib gözlənilir...';
+             diceInstructions.textContent = instructionText;
+             diceInstructions.classList.toggle('opponent-joined', isOpponentPresent);
+             diceInstructions.classList.toggle('waiting', !isOpponentPresent);
+        }
+        if (yourRollResultDisplay) yourRollResultDisplay.textContent = '?';
+        if (opponentRollResultDisplay) opponentRollResultDisplay.textContent = '?';
+        if (yourRollBox) yourRollBox.className = 'result-box';
+        if (opponentRollBox) opponentRollBox.className = 'result-box';
+        player1Roll = null; // Öz nəticəmizi sıfırla
+        player2Roll = null; // Rəqibin nəticəsini sıfırla (əgər əvvəlki oyundan qalıbsa)
+        diceWinner = null;
+        if(diceCubeElement) diceCubeElement.style.cursor = isOpponentPresent ? 'grab' : 'not-allowed'; // Rəqib yoxdursa, klikləmək olmaz
+        initDice(); // Zərin vizual vəziyyətini sıfırla
+    }
+
+    // Zəri fırlatmağa başlayır
+    function rollDice() {
+        if (isDiceRolling || !isOpponentPresent || !diceCubeElement) {
+             console.log(`[rollDice] Bloklandı (rolling=${isDiceRolling}, opponent=${isOpponentPresent})`);
+             return; // Zər fırlanırsa və ya rəqib yoxdursa, heç nə etmə
+        }
+        isDiceRolling = true;
+        console.log("[rollDice] Zər atılır...");
+        diceCubeElement.style.cursor = 'default';
+        if(yourRollBox) yourRollBox.className = 'result-box'; // Köhnə stilləri təmizlə
+        if(opponentRollBox) opponentRollBox.className = 'result-box';
+        if(yourRollResultDisplay) yourRollResultDisplay.textContent = '?'; // Nəticəni müvəqqəti gizlət
+        // if(opponentRollResultDisplay) opponentRollResultDisplay.textContent = '?'; // Rəqibin nəticəsini hələ bilmirik
+        if(diceInstructions) diceInstructions.textContent = 'Zər atılır...';
+
+        const myRoll = Math.floor(Math.random() * 6) + 1;
+        console.log(`[rollDice] Sizin atışınız: ${myRoll}`);
+        player1Roll = myRoll; // Öz nəticəmizi saxla
+
+        // Animasiyanı başlat (əvvəlki kod kimi)
+        const rollDurationValue = getComputedStyle(document.documentElement).getPropertyValue('--roll-duration').trim() || '2.0s';
+        const rollTimingFunctionValue = getComputedStyle(document.documentElement).getPropertyValue('--roll-timing-function').trim() || 'cubic-bezier(0.3, 0.9, 0.4, 1)';
+        const finalFace = diceRotations[myRoll];
+        const fullRotationsX = 360 * (2 + Math.floor(Math.random() * 2));
+        const fullRotationsY = 360 * (2 + Math.floor(Math.random() * 2));
+        const fullRotationsZ = 360 * (1 + Math.floor(Math.random() * 1));
+        const targetRotateX = finalFace.x + fullRotationsX;
+        const targetRotateY = finalFace.y + fullRotationsY;
+        const targetRotateZ = 0 + fullRotationsZ; // Z oxu ətrafında fırlanmanı sıfırlayaq
+        diceCubeElement.style.transition = `transform ${rollDurationValue} ${rollTimingFunctionValue}`;
+        setDiceTransform(targetRotateX, targetRotateY, targetRotateZ); // targetRotateZ əlavə edildi
+
+        // Multiplayer oyunu üçün nəticəni serverə göndər
+        if (!isPlayingAgainstAI && socket && socket.connected) {
+             console.log(`[rollDice] Nəticə (${myRoll}) serverə göndərilir ('dice_roll_result')...`);
+             socket.emit('dice_roll_result', { roll: myRoll });
+        }
+
+        // Animasiya bitdikdən sonra
+        setTimeout(() => {
+            console.log("[rollDice] Animasiya bitdi.");
+            isDiceRolling = false; // Artıq fırlanmır
+            diceCubeElement.style.transition = 'none'; // Keçidləri söndür
+            currentDiceRotateX = finalFace.x; // Hazırkı vəziyyəti saxla
+            currentDiceRotateY = finalFace.y;
+            currentDiceRotateZ = 0; // Z oxunu sıfırla
+            setDiceTransform(); // Son vəziyyəti tətbiq et
+
+            if(yourRollResultDisplay) yourRollResultDisplay.textContent = myRoll; // Öz nəticəmizi göstər
+
+            if (isPlayingAgainstAI) {
+                // AI oyununda rəqibin nəticəsini dərhal simulyasiya et
+                const opponentRollValue = Math.floor(Math.random() * 6) + 1;
+                 console.log(`[rollDice] AI atışı (simulyasiya): ${opponentRollValue}`);
+                player2Roll = opponentRollValue;
+                if (opponentRollResultDisplay) opponentRollResultDisplay.textContent = opponentRollValue;
+                handleRollOffResults(myRoll, opponentRollValue); // Nəticələri dərhal emal et
+            } else {
+                // Multiplayer oyununda rəqibin nəticəsini gözləyirik ('opponent_dice_result' hadisəsi)
+                console.log("[rollDice] Rəqibin zər nəticəsi gözlənilir...");
+                 if (player2Roll !== null) { // Əgər rəqibin nəticəsi artıq gəlibsə (nadiren)
+                      console.log("[rollDice] Rəqibin nəticəsi artıq gəlib, handleRollOffResults çağırılır.");
+                      handleRollOffResults(myRoll, player2Roll);
+                 } else {
+                     if(diceInstructions) diceInstructions.textContent = 'Rəqibin zər atması gözlənilir...';
+                 }
+            }
+        }, parseFloat(rollDurationValue.replace('s', '')) * 1000 + 100); // Animasiya + kiçik bufer
+    }
+
+    // Hər iki zər nəticəsi bəlli olduqda çağırılır
+    function handleRollOffResults(myRoll, opponentRoll) {
+        console.log(`[handleRollOffResults] Nəticələr: Siz=${myRoll}, Rəqib=${opponentRoll}`);
+        // Nəticələrin göstərildiyindən əmin olaq (rollDice və opponent_dice_result içində onsuz da edilir)
+        if(yourRollResultDisplay && yourRollResultDisplay.textContent === '?') yourRollResultDisplay.textContent = myRoll;
+        if(opponentRollResultDisplay && opponentRollResultDisplay.textContent === '?') opponentRollResultDisplay.textContent = opponentRoll;
+
+        if (myRoll > opponentRoll) {
+            diceWinner = currentPlayerName; // Özümüz qalibik
+            if(diceInstructions) diceInstructions.textContent = 'Siz yüksək atdınız! Simvol seçin.';
+            if(yourRollBox) yourRollBox.classList.add('winner');
+            if(opponentRollBox) opponentRollBox.classList.remove('winner', 'tie');
+            triggerDiceScatterAndSymbolSelect(); // Simvol seçiminə keç
+        } else if (opponentRoll > myRoll) {
+            diceWinner = opponentPlayerName; // Rəqib qalibdir
+            if(diceInstructions) diceInstructions.textContent = `${escapeHtml(opponentPlayerName)} yüksək atdı! ${isPlayingAgainstAI ? 'Simvol avtomatik seçiləcək.' : 'Simvol seçimi gözlənilir.'}`;
+            if(opponentRollBox) opponentRollBox.classList.add('winner');
+            if(yourRollBox) yourRollBox.classList.remove('winner', 'tie');
+            triggerDiceScatterAndSymbolSelect(); // Simvol seçiminə keç (rəqibin seçməsini gözlə)
+        } else {
+            // Bərabərlik
+            diceWinner = null;
+            player1Roll = null; // Nəticələri sıfırla ki, yenidən atılsın
+            player2Roll = null;
+            if(diceInstructions) diceInstructions.textContent = 'Bərabərlik! Təkrar atmaq üçün zərə klikləyin.';
+            if(yourRollBox) yourRollBox.classList.add('tie');
+            if(opponentRollBox) opponentRollBox.classList.add('tie');
+            isDiceRolling = false; // Yenidən atmaq üçün flag-i sıfırla
+            if (isOpponentPresent && diceCubeElement) diceCubeElement.style.cursor = 'grab'; // Zəri aktiv et
+        }
+        console.log(`[handleRollOffResults] Qalib: ${diceWinner === null ? 'Bərabərlik' : diceWinner}`);
+    }
+
+    // Zəri dağıtma və simvol seçiminə keçid (əvvəlki kod kimi)
+    function triggerDiceScatterAndSymbolSelect() { /* ... */ }
+    function initDice() { /* ... */ }
+    function setDiceTransform(rotX = currentDiceRotateX, rotY = currentDiceRotateY, rotZ = currentDiceRotateZ) { /* ... */ }
+    // Zər sürükləmə/klikləmə hadisələri (əvvəlki kod kimi)
+    function handleMouseDown(event) { /* ... */ }
+    function handleMouseMove(event) { /* ... */ }
+    function handleMouseUp(event) { /* ... */ }
+    function handleTouchStart(e) { /* ... */ }
+    function handleTouchMove(e) { /* ... */ }
+    function handleTouchEnd(e) { /* ... */ }
+    function handleDiceClickOrDragEnd() { /* ... (İçində rollDice() çağırılır) ... */ }
+
+
+    // ---- Simvol Seçim Funksiyaları (Socket.IO ilə) ----
+
+    function initSymbolSelection() {
+        console.log("[initSymbolSelection] Başladı.");
+        if (!symbolSelectModal || !symbolOptionsDiv || !symbolWaitingMessage || !symbolSelectTitle || !symbolSelectMessage) {
+            console.error("Simvol seçim modalı elementləri tapılmadı!");
+            startGameProcedure('X'); // Fallback: X ilə başla
+            return;
+        }
+        symbolWaitingMessage.style.display = 'none';
+        symbolOptionsDiv.style.display = 'flex';
+
+        if (diceWinner === currentPlayerName) { // Əgər biz qalibiksə
+            symbolSelectTitle.textContent = "Simvol Seçin";
+            symbolSelectMessage.textContent = "Oyuna başlamaq üçün simvolunuzu seçin:";
+            // Köhnə listenerları silib yenisini əlavə et (əmin olmaq üçün)
+            symbolOptionsDiv.querySelectorAll('.symbol-button').forEach(button => {
+                 const newButton = button.cloneNode(true);
+                 button.parentNode.replaceChild(newButton, button);
+                 newButton.addEventListener('click', handleSymbolChoice);
+            });
+        } else { // Əgər rəqib qalibdirsə
+            symbolSelectTitle.textContent = "Simvol Seçilir";
+            symbolSelectMessage.textContent = `Oyuna "${escapeHtml(opponentPlayerName)}" başlayır. ${isPlayingAgainstAI ? 'Simvol avtomatik seçiləcək.' : 'Rəqib simvol seçir...'}`;
+            symbolOptionsDiv.style.display = 'none';
+            symbolWaitingMessage.style.display = 'block';
+            if (isPlayingAgainstAI) {
+                // AI üçün simvolu simulyasiya et
+                 simulateOpponentSymbolChoice(500 + Math.random() * 500); // 0.5-1 saniyə gözləmə
+            } else {
+                // Multiplayer oyununda rəqibdən 'opponent_symbol_chosen' hadisəsini gözləyirik
+                console.log("[initSymbolSelection] Rəqibin simvol seçimi gözlənilir...");
+            }
+        }
+        showModal(symbolSelectModal);
+    }
+
+    // İstifadəçi simvol seçdikdə çağırılır
+    function handleSymbolChoice(event) {
+        const chosenSymbol = event.target.dataset.symbol;
+        if (!chosenSymbol) return;
+
+        console.log(`[handleSymbolChoice] ${currentPlayerName} "${chosenSymbol}" seçdi.`);
+
+        // Multiplayer oyununda seçimi serverə göndər
+        if (!isPlayingAgainstAI && socket && socket.connected) {
+            console.log(`[handleSymbolChoice] Simvol seçimi (${chosenSymbol}) serverə göndərilir ('symbol_choice')...`);
+            socket.emit('symbol_choice', { symbol: chosenSymbol });
+        }
+
+        // Oyunu seçilmiş simvolla başlat (həm AI, həm multiplayer üçün)
+        startGameProcedure(chosenSymbol);
+    }
+
+    // AI-nin simvol seçimini simulyasiya edir
+    function simulateOpponentSymbolChoice(delay) {
+        const opponentChoice = (Math.random() > 0.5) ? 'X' : 'O';
+        console.log(`[simulateOpponentSymbolChoice] AI "${opponentChoice}" seçdi (simulyasiya).`);
+        setTimeout(() => {
+             if (symbolSelectModal.style.display === 'block') { // Əgər modal hələ açıqdırsa
+                 startGameProcedure(opponentChoice);
+             } else {
+                  console.warn("[simulateOpponentSymbolChoice] Modal artıq bağlı idi.");
+             }
+        }, delay);
+    }
+
+
+    // ---- Oyunu Başlatma Proseduru ----
+    function startGameProcedure(startingSymbol) {
+        console.log(`[startGameProcedure] Oyun "${startingSymbol}" ilə başlayır. Zər qalibi: ${diceWinner}`);
+        hideModal(symbolSelectModal); // Simvol modalını bağla
+
+        // Simvolları təyin et
+        if (diceWinner === currentPlayerName) { // Əgər biz zəri udmuşuqsa
+            player1Symbol = startingSymbol;
+            player2Symbol = (startingSymbol === 'X') ? 'O' : 'X';
+            currentPlayer = player1Symbol; // Oyuna biz başlayırıq
+        } else { // Əgər rəqib zəri udubsa
+            player2Symbol = startingSymbol;
+            player1Symbol = (startingSymbol === 'X') ? 'O' : 'X';
+            currentPlayer = player2Symbol; // Oyuna rəqib başlayır
+        }
+
+        // AI oyunudursa, AI simvolunu təyin et
+        aiPlayerSymbol = isPlayingAgainstAI ? player2Symbol : '';
+
+        console.log(`[startGameProcedure] Simvollar: P1(${currentPlayerName})=${player1Symbol}, P2(${opponentPlayerName})=${player2Symbol}. Başlayan: ${currentPlayer}`);
+        if (isPlayingAgainstAI) console.log(`[startGameProcedure] AI Simvolu: ${aiPlayerSymbol}`);
+
+        isGameOver = false;
+        if (restartGameBtn) restartGameBtn.disabled = false; // Yenidən başlat aktiv olur
+        updatePlayerInfo(); // Oyunçu info bloklarını yenilə
+        updateTurnIndicator(); // Sıranı göstər
+
+        // Hüceyrələrə klik listenerlarını əlavə et
+        boardElement.style.opacity = '1'; // Lövhəni görünən et
+        console.log("[startGameProcedure] Hüceyrə listenerları əlavə edilir...");
+        cells.forEach((cell, index) => {
+            // Köhnə listenerları silmək üçün ən etibarlı yol klonlamadır
+            const newCell = cell.cloneNode(true);
+            cell.parentNode.replaceChild(newCell, cell);
+            cells[index] = newCell; // Yeni hüceyrəni massivdə saxla
+
+            if (board[index] === '') { // Yalnız boş hüceyrələrə
+                 cells[index].style.cursor = 'pointer';
+                 cells[index].addEventListener('click', handleCellClick);
+            } else {
+                 cells[index].style.cursor = 'not-allowed';
+            }
+        });
+        console.log("[startGameProcedure] Hüceyrə listenerları əlavə edildi.");
+
+        // Oyun başlayanda lövhəni aktiv və ya deaktiv et
+        if (!isGameOver) {
+             // Əgər sıra bizdədirsə (və ya AI-də deyilsə), lövhə aktivdir
+             const isMyTurn = currentPlayer === player1Symbol;
+             boardElement.style.pointerEvents = (!isPlayingAgainstAI && !isMyTurn) ? 'none' : 'auto';
+
+             // Əgər AI başlayırsa, ilk hərəkəti etsin
+             if (isPlayingAgainstAI && currentPlayer === aiPlayerSymbol) {
+                 console.log("[startGameProcedure] AI başlayır, makeAIMove çağırılır.");
+                 boardElement.style.pointerEvents = 'none'; // AI hərəkət edərkən lövhəni blokla
+                 makeAIMove();
+             } else {
+                 console.log(`[startGameProcedure] ${isMyTurn ? 'İnsan' : 'Rəqib'} başlayır. Lövhə: ${boardElement.style.pointerEvents}`);
+             }
+        } else {
+             boardElement.style.pointerEvents = 'none'; // Oyun bitibsə deaktiv
+        }
+         console.log("[startGameProcedure] Bitdi.");
+    } // startGameProcedure sonu
+
+
+    // ---- Oyun Axışı (Socket.IO ilə) ----
+
+    // Hüceyrəyə klikləndikdə
+    function handleCellClick(event) {
+        console.log("[handleCellClick] Başladı.");
+        const clickedCell = event.target;
+        const index = parseInt(clickedCell.dataset.index);
+
+        // Klikləmə şərtlərini yoxla
+        const myTurn = currentPlayer === player1Symbol;
+        if (isGameOver || isDiceRolling || !myTurn || board[index] !== '') {
+            console.log(`[handleCellClick] Bloklandı (GameOver=${isGameOver}, DiceRolling=${isDiceRolling}, MyTurn=${myTurn}, Board[${index}]=${board[index]})`);
+             return;
+        }
+
+        console.log(`[handleCellClick] İnsan ${index} xanasına ${player1Symbol} qoyur.`);
+
+        // Hərəkəti lokal olaraq yerləşdir və nəticəni yoxla
+        // placeMark funksiyası sıranı dəyişdirmir
+        placeMark(index, player1Symbol);
+
+        // Əgər oyun bitmədisə
+        if (!isGameOver) {
+            if (isPlayingAgainstAI) {
+                // AI Oyununda: Sıranı AI-yə ver və hərəkət etməsini gözlə
+                console.log("[handleCellClick] AI Oyunu: Sıra AI-ya keçirilir.");
+                switchPlayer(); // Sıranı dəyişdir
+                updateTurnIndicator();
+                boardElement.style.pointerEvents = 'none'; // AI düşünərkən lövhəni blokla
+                makeAIMove();
+            } else {
+                // Multiplayer Oyununda: Hərəkəti serverə göndər
+                console.log(`[handleCellClick] Multiplayer: Hərəkət (${index}, ${player1Symbol}) serverə göndərilir ('make_move')...`);
+                if (socket && socket.connected) {
+                     socket.emit('make_move', { index: index, mark: player1Symbol });
+                     boardElement.style.pointerEvents = 'none'; // Rəqibin hərəkətini gözləyərkən lövhəni blokla
+                     // Sıranı dərhal rəqibə keçirə bilərik (UI üçün)
+                     switchPlayer();
+                     updateTurnIndicator();
+                      if (gameStatusDisplay) gameStatusDisplay.textContent = `Sıra: ${opponentPlayerName}`; // Statusu yenilə
+                } else {
+                     console.error("[handleCellClick] Socket bağlantısı yoxdur, hərəkət göndərilə bilmədi!");
+                     // Hərəkəti geri qaytarmaq və ya xəta mesajı göstərmək olar
+                     board[index] = ''; // Hərəkəti geri alaq
+                     clickedCell.textContent = '';
+                     clickedCell.classList.remove(player1Symbol);
+                     clickedCell.style.cursor = 'pointer';
+                     alert("Serverlə bağlantı yoxdur. Hərəkət edilə bilmədi.");
+                }
+            }
+        } else {
+             console.log("[handleCellClick] Oyun insanın hərəkəti ilə bitdi.");
+             boardElement.style.pointerEvents = 'none'; // Oyun bitibsə lövhəni blokla
+        }
+    } // handleCellClick sonu
+
+
+    // Hərəkəti lövhəyə yerləşdirir və qazanma/bərabərlik yoxlayır
+    // Bu funksiya sıranı dəyişdirmir!
+    function placeMark(index, mark) {
+        console.log(`===== placeMark: Index=${index}, Mark=${mark} =====`);
+        if (index < 0 || index >= board.length || board[index] !== '' || isGameOver) {
+             console.log(`placeMark: Keçərsiz. Çıxılır.`);
+             return false; // Hərəkət yerləşdirilmədi
+        }
+        board[index] = mark;
+        const cellElement = cells[index];
+        if (!cellElement) { console.error(`placeMark: Hata! cells[${index}] tapılmadı!`); return false; }
+
+        // Vizual olaraq yerləşdir
+        cellElement.textContent = mark;
+        cellElement.classList.add(mark === 'X' ? 'X' : 'O'); // Düzgün klası əlavə et
+        cellElement.style.cursor = 'not-allowed';
+        // Listenerları silmək üçün klonlama (vacibdir!)
+        const newCell = cellElement.cloneNode(true);
+        cellElement.parentNode.replaceChild(newCell, cellElement);
+        cells[index] = newCell; // Yenilənmiş elementi saxla
+
+        console.log(`placeMark: ${index} xanası ${mark} ilə dolduruldu.`);
+
+        // Qazanma və bərabərlik yoxlaması
+        const win = checkWin(mark);
+        const draw = !win && !board.includes('');
+
+        if (win) {
+            console.log(`placeMark: ${mark} qazandı.`);
+            endGame(false, mark); // Oyunu bitir (Qalib var)
+            highlightWinningCells();
+            return true; // Hərəkət yerləşdirildi və oyun bitdi
+        } else if (draw) {
+            console.log("placeMark: Bərabərlik.");
+            endGame(true, null); // Oyunu bitir (Bərabərlik)
+            return true; // Hərəkət yerləşdirildi və oyun bitdi
+        } else {
+            console.log("placeMark: Oyun davam edir.");
+            return true; // Hərəkət yerləşdirildi, oyun davam edir
+        }
+        // console.log("===== placeMark bitdi. =====");
+    } // placeMark sonu
+
+
+    // Sıranı dəyişdirir
+    function switchPlayer() {
+        if(isGameOver) return;
+        currentPlayer = (currentPlayer === player1Symbol) ? player2Symbol : player1Symbol;
+        console.log(`switchPlayer: Yeni sıra: ${currentPlayer}`);
+        // updateTurnIndicator() bu funksiyadan sonra çağırılmalıdır
+    }
+
+    // --- AI Hərəkət Məntiqi (dəyişiklik yoxdur, əvvəlki kod kimi) ---
+    function makeAIMove() { /* ... */ }
+    function findBestMove() { /* ... */ }
+    function getCenterCells(size) { /* ... */ }
+    function minimax(currentBoard, depth, isMaximizing, humanSymbol, aiSymbol, maxDepth) { /* ... */ }
+    function checkWinnerForMinimax(currentBoard, humanSymbol, aiSymbol) { /* ... */ }
+
+
+    // --- Qazanma/Bərabərlik Yoxlaması (dəyişiklik yoxdur) ---
+    function checkWin(playerSymbolToCheck) { /* ... */ }
+    function generateWinConditions(size) { /* ... */ }
+    function checkDraw() { /* ... */ }
+    function highlightWinningCells() { /* ... */ }
+
+    // --- Hissə 3 Sonu ---
+    // public/OYUNLAR/tictactoe/game/oda_ici.js
+// Version: v2 - Socket.IO İnteqrasiyası + AI URL Parametri - Hissə 4/4
+
+// ---- DOMContentLoaded içində davam edirik (Hissə 3-dən) ----
+
+    // --- Oyun Sonu ---
+    function endGame(isDraw, winnerMark) {
+        console.log(`[endGame] Oyun bitdi. Bərabərlik: ${isDraw}, Qazanan İşarə: ${winnerMark}`);
+        isGameOver = true;
+        boardElement.style.pointerEvents = 'none'; // Lövhəni deaktiv et
+        if (restartGameBtn) restartGameBtn.disabled = false; // Yenidən başlat aktiv olur
+
+        const winnerName = winnerMark === player1Symbol ? currentPlayerName : opponentPlayerName;
+
+        if (isDraw) {
+            if (gameStatusDisplay) { gameStatusDisplay.textContent = "Oyun Bərabərə!"; gameStatusDisplay.classList.add('draw'); }
+            if (turnIndicator) turnIndicator.textContent = "Bərabərə";
+        } else {
+            if (gameStatusDisplay) { gameStatusDisplay.textContent = `${escapeHtml(winnerName)} Qazandı!`; gameStatusDisplay.classList.add('win'); }
+            if (turnIndicator) turnIndicator.textContent = "Bitdi";
+             // Qalib üçün effektləri işə sal
+             if(winnerMark) triggerShatterEffect(winnerMark); // Yalnız qalib varsa
+        }
+
+        // Aktiv oyunçu stilini qaldır
+        playerXInfo?.classList.remove('active-player');
+        playerOInfo?.classList.remove('active-player');
+        updatePlayerInfo(); // Simvolları və adları son vəziyyətdə göstər
+    } // endGame sonu
+
+
+    // --- Effektler (dəyişiklik yoxdur) ---
+    function triggerShatterEffect(winnerMark) {
+         if (!fireworksOverlay || !shatteringTextContainer || !winnerMark) return;
+         clearShatteringText();
+         const text = winnerMark === player1Symbol ? "Siz Qazandınız!" : `${escapeHtml(opponentPlayerName)} Qazandı!`;
+         const chars = text.split('');
+         chars.forEach((char, index) => { /* ... (span yaratma) ... */ });
+         fireworksOverlay.classList.add('visible');
+         shatteringTextContainer.style.opacity = '1';
+         setTimeout(() => { /* ... (animasiyanı başlatma) ... */ }, 100);
+     }
+    function hideFireworks() { if (fireworksOverlay) fireworksOverlay.classList.remove('visible'); if (shatteringTextContainer) shatteringTextContainer.style.opacity = '0'; setTimeout(clearShatteringText, 500); }
+    function clearShatteringText() { if (shatteringTextContainer) shatteringTextContainer.innerHTML = ''; }
+
+
+    // --- Otaq Əməliyyatları (Serverə göndərmək üçün yenilənməlidir) ---
+    // Qeyd: Otaq parametrlərini (ad, şifrə, ölçü) dəyişmək üçün server tərəfində də dəstək olmalıdır (məsələn, 'update_room_settings' socket hadisəsi).
+    // Hazırkı kodda bu yoxdur, yalnız client-side görünüşü dəyişir və ölçü dəyişdikdə lokal restart edir.
+    function openEditModal() {
+         if(isPlayingAgainstAI) { alert("AI oyununda otaq ayarları dəyişdirilə bilməz."); return; }
+         if(!isCurrentUserCreator) { alert("Yalnız otağı yaradan parametrləri dəyişə bilər."); return; }
+         // ... (modalı doldurma kodu əvvəlki kimi qala bilər) ...
+         showModal(editRoomModal);
+    }
+    function saveRoomChanges() {
+         console.log("Otaq dəyişiklikləri yadda saxlanılır (Hələlik yalnız Lokal)...");
+         // ... (Validasiya və dəyərləri alma kodu əvvəlki kimi) ...
+
+         // TODO: Serverə 'update_room_settings' hadisəsi göndərmək lazımdır.
+         // socket.emit('update_room_settings', { roomId: currentRoomId, name: newName, hasPassword: finalHasPassword, password: newPasswordValue, boardSize: newBoardSize });
+
+         // Hələlik lokal dəyişiklikləri tətbiq edirik (server dəstəyi olmadan)
+         let needsRestart = false;
+         if (currentRoomData.boardSize !== newBoardSize) {
+              needsRestart = true;
+              currentRoomData.boardSize = newBoardSize;
+              boardSize = newBoardSize;
+              adjustStylesForBoardSize(boardSize);
+         }
+         currentRoomData.name = newName;
+         currentRoomData.hasPassword = finalHasPassword;
+         if (roomNameDisplay) roomNameDisplay.textContent = `Otaq: ${escapeHtml(newName)}`;
+
+         showMsg(editRoomMessage, 'Dəyişikliklər yadda saxlandı (Lokal).', 'success', 2500);
+         hideModal(editRoomModal);
+
+         if (needsRestart) {
+              console.log("Ölçü dəyişdiyi üçün oyun yenidən başladılır (Lokal)...");
+              // Serverə də bildirmək lazımdır ki, qarşı tərəf də restart etsin
+              // socket.emit('force_restart', { reason: 'Board size changed' });
+              handleRestartGame(true); // Lokal olaraq dərhal restart et
+         }
+    }
+    function deleteRoom() {
+         console.warn("Otaq silinməsi funksiyası çağırıldı (Hələlik yalnız Lokal).");
+         if(isPlayingAgainstAI || !isCurrentUserCreator) return; // AI otağı silinməz, yalnız yaradan silə bilər
+
+         if (confirm(`'${escapeHtml(currentRoomData.name)}' otağını silmək istədiyinizə əminsiniz?`)) {
+             // TODO: Serverə 'delete_room' hadisəsi göndərmək lazımdır
+             // if (socket && socket.connected) socket.emit('delete_room', { roomId: currentRoomId });
+
+              showMsg(editRoomMessage, 'Otaq silinir...', 'info', 0);
+              // Hələlik lobiyə yönləndiririk (server silməsini gözləmədən)
+              setTimeout(() => {
+                  alert("Otaq silindi (Simulyasiya). Lobiyə qayıdırsınız.");
+                  window.location.href = '../lobby/test_odalar.html';
+              }, 1500);
+         }
+    }
+
+    // Rəqibi otaqdan çıxarmaq (Server dəstəyi tələb edir)
+    function handleKickOpponent() {
+        if (isPlayingAgainstAI || !isCurrentUserCreator || !isOpponentPresent) {
+             console.log(`Kick şərtləri ödənmir.`); return;
+        }
+        if (confirm(`${escapeHtml(opponentPlayerName)}-i otaqdan çıxarmaq istədiyinizə əminsiniz?`)) {
+             console.log(`${escapeHtml(opponentPlayerName)} otaqdan çıxarılır (Tələb göndərilir)...`);
+             // TODO: Serverə 'kick_opponent' hadisəsi göndər
+             // if(socket && socket.connected) socket.emit('kick_opponent', { roomId: currentRoomId });
+             alert("Kick funksiyası hələ tam aktiv deyil (server dəstəyi lazımdır).");
+        }
+    }
+
+    // AI Çağırmaq (Oyun içində mənasızdır, lobidə edilməlidir)
+    function handleCallSnow() {
+         console.log("handleCallSnow: Bu düymə oyun içində işləməməlidir.");
+         // Bu düyməni updateHeaderButtonsVisibility içində gizlətmək lazımdır
+    }
+
+    // Header düymələrinin görünüşünü tənzimləyir
+     function updateHeaderButtonsVisibility() {
+         // Edit: AI oyunu deyilsə VƏ mən yaradıcıyamsa
+         const showEdit = !isPlayingAgainstAI && isCurrentUserCreator;
+         // Kick: AI oyunu deyilsə VƏ mən yaradıcıyamsa VƏ rəqib varsa
+         const showKick = !isPlayingAgainstAI && isCurrentUserCreator && isOpponentPresent;
+         // Call Snow: Bu düymə oyun içində olmamalıdır
+         const showCallSnow = false;
+
+         if (editRoomBtn) editRoomBtn.style.display = showEdit ? 'inline-flex' : 'none';
+         if (kickOpponentBtn) kickOpponentBtn.style.display = showKick ? 'inline-flex' : 'none';
+         if (callSnowBtn) callSnowBtn.style.display = showCallSnow ? 'inline-flex' : 'none'; // Həmişə gizli
+         console.log(`[updateHeaderButtonsVisibility] Düymə görünüşləri: Edit=${showEdit}, Kick=${showKick}, CallSnow=${showCallSnow}`);
+     }
+
+
+    // --- Yeniden Başlatma (Socket.IO ilə) ---
+    function handleRestartGame(accepted = false) {
+        // Oyun bitməyibsə və ya rəqib yoxdursa (AI oyunu xaric) restart olmaz
+        if (!isGameOver || (!isOpponentPresent && !isPlayingAgainstAI)) {
+             console.log("Yenidən başlatmaq üçün şərtlər ödənmir.");
+             return;
+        }
+
+        console.log(`handleRestartGame çağırıldı. Qəbul edilib: ${accepted}`);
+
+        if (isPlayingAgainstAI) {
+             // AI oyununda dərhal restart et
+             console.log("AI oyunu yenidən başladılır...");
+             performLocalRestart();
+        } else {
+             // Multiplayer oyunu
+             if (accepted) {
+                  // Əgər qəbul edilibsə (ya biz qəbul etdik, ya da rəqibdən qəbul gəldi)
+                  console.log("Multiplayer oyunu yenidən başladılır...");
+                  performLocalRestart(); // Lokal restart et
+                  // Serverə və ya rəqibə ayrıca bildirməyə ehtiyac yoxdur (əgər 'accept_restart' hər iki tərəfdə restartı trigger edirsə)
+             } else {
+                  // Əgər yenicə düyməyə basılıbsa (təklif göndərilir)
+                  if (socket && socket.connected) {
+                       console.log("Yenidən başlatma təklifi serverə göndərilir ('request_restart')...");
+                       socket.emit('request_restart');
+                       if(gameStatusDisplay) gameStatusDisplay.textContent = "Yenidən başlatma təklifi göndərildi. Rəqib gözlənilir...";
+                       // Düyməni müvəqqəti deaktiv etmək olar
+                       if(restartGameBtn) restartGameBtn.disabled = true;
+                       setTimeout(() => { // Əgər cavab gəlməzsə
+                            if(restartGameBtn && restartGameBtn.disabled && isGameOver) { // Hələ də deaktivdirsə və oyun bitibsə
+                                 restartGameBtn.disabled = false;
+                                 if(gameStatusDisplay && gameStatusDisplay.textContent.includes("gözlənilir")) {
+                                      gameStatusDisplay.textContent = "Yenidən başlatma təklifinə cavab gəlmədi.";
+                                 }
+                            }
+                       }, 15000); // 15 saniyə gözlə
+                  } else {
+                       alert("Serverlə bağlantı yoxdur. Təklif göndərilə bilmədi.");
+                  }
+             }
+        }
+    } // handleRestartGame sonu
+
+    // Əsl restart əməliyyatlarını edən funksiya
+    function performLocalRestart() {
+         console.log("performLocalRestart: Oyun vəziyyəti və lövhə sıfırlanır...");
+         hideFireworks();
+         resetGameStateVars(); // Oyun dəyişənlərini sıfırla
+         resetBoardAndStatus(); // Lövhəni və UI-ni sıfırla
+
+         // Oyunu yenidən zər atma mərhələsinə qaytar
+         if (isOpponentPresent) { // Rəqib (və ya AI) varsa
+              if (gameStatusDisplay) gameStatusDisplay.textContent = "Oyun yenidən başlayır. Zər atılır...";
+              setupDiceModalForRollOff();
+              showModal(diceRollModal);
+              initDice();
+         } else {
+              // Bu hal normalda multiplayerdə baş verməməlidir, çünki restart yalnız rəqib varkən təklif edilir/qəbul edilir.
+              console.warn("performLocalRestart: Rəqib olmadan restart edilir?");
+              if (gameStatusDisplay) gameStatusDisplay.textContent = "Rəqib gözlənilir...";
+              hideModal(diceRollModal);
+              hideModal(symbolSelectModal);
+              updateHeaderButtonsVisibility();
+         }
+          // Yenidən başlat düyməsi zər atıldıqdan sonra aktiv olacaq (startGameProcedure içində)
+          if (restartGameBtn) restartGameBtn.disabled = true;
+    }
+
+
+    // --- Əsas UI Hadisə Dinləyiciləri ---
+    if (leaveRoomBtn) {
+        leaveRoomBtn.addEventListener('click', () => {
+            if (confirm("Otaqdan çıxmaq istədiyinizə əminsiniz?")) {
+                 // Multiplayer oyununda serverə bildirmək daha yaxşıdır
+                 if (!isPlayingAgainstAI && socket && socket.connected) {
+                      console.log("Serverə 'leave_room' hadisəsi göndərilir...");
+                      socket.emit('leave_room');
+                 }
+                 // Lobiyə və ya əvvəlki səhifəyə qayıt
+                 window.location.href = '../lobby/test_odalar.html'; // Və ya history.back()
+            }
+        });
+    }
+     if (restartGameBtn) {
+          restartGameBtn.addEventListener('click', () => handleRestartGame(false)); // Restart təklifi göndər/başlat
+     }
+    if (editRoomBtn) editRoomBtn.addEventListener('click', openEditModal);
+    if (closeEditModalButton) closeEditModalButton.addEventListener('click', () => hideModal(editRoomModal));
+    window.addEventListener('click', (event) => { if (event.target == editRoomModal) hideModal(editRoomModal); });
+    if (saveRoomChangesBtn) saveRoomChangesBtn.addEventListener('click', saveRoomChanges);
+    if (deleteRoomConfirmBtn) deleteRoomConfirmBtn.addEventListener('click', deleteRoom);
+    if (kickOpponentBtn) kickOpponentBtn.addEventListener('click', handleKickOpponent);
+    if (callSnowBtn) callSnowBtn.addEventListener('click', handleCallSnow); // Bu onsuz da gizli olmalıdır
+
+    // Zar ilə bağlı listenerlar (əvvəlki kod kimi)
+    if (diceCubeElement) {
+         diceCubeElement.addEventListener('mousedown', handleMouseDown);
+         diceCubeElement.addEventListener('touchstart', handleTouchStart, { passive: false });
+    } else { console.error("Zər kub elementi (diceCubeElement) tapılmadı!"); }
+
+    // Initialize game after authentication is successful (called within auth check)
+    // initializeGame(); // Bu artıq yuxarıda auth içində çağırılır
+
+}); // DOMContentLoaded Sonu

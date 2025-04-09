@@ -1,116 +1,77 @@
 // public/OYUNLAR/tictactoe/game/oda_ici.js
-// Version: v2.2 - Socket.IO + AI URL + Debug Logs - Hissə 1/5
+// Version: v2.3 - SNOW düyməsi düzəlişləri ilə
+// Hissə 1/5 - Qlobal Dəyişənlər, DOM, Yardımçılar, Sıfırlama
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log("Oda İçi JS (v2.2 - Debug Logs) Başladı.");
+    console.log("Oda İçi JS (v2.3 - SNOW Düzəlişləri) Başladı.");
 
     // ---- Qlobal Dəyişənlər ----
     let loggedInUser = null;
     let currentRoomId = null;
-    let currentRoomData = {};
+    let currentRoomData = {}; // Otaq məlumatlarını saxlamaq üçün (ad, yaradan və s.)
     let socket = null;
-    let currentPlayerName = 'Oyunçu';
+    let currentPlayerName = 'Oyunçu'; // Girişdən sonra yenilənəcək
     let opponentPlayerName = 'Rəqib';
     let isOpponentPresent = false;
-    let isPlayingAgainstAI = false;
-    let aiPlayerSymbol = '';
-    let isCurrentUserCreator = false;
+    let isPlayingAgainstAI = false; // Hazırda AI ilə oynanılırmı?
+    let aiPlayerSymbol = ''; // AI-nin simvolu (X və ya O)
+    let isCurrentUserCreator = false; // Bu client otağı yaradıb mı?
 
     // ---- Oyun Durumu Dəyişənləri ----
-    let board = [];
-    let currentPlayer = '';
-    let player1Symbol = '?';
-    let player2Symbol = '?';
-    let isGameOver = true;
-    let boardSize = 3;
-    let cells = [];
-    let winningCombination = [];
-    let player1Roll = null;
-    let player2Roll = null;
-    let diceWinner = null;
+    let board = []; // Oyun lövhəsi (massiv)
+    let currentPlayer = ''; // Hazırkı oyunçunun simvolu (X və ya O)
+    let player1Symbol = '?'; // Bu clientin simvolu
+    let player2Symbol = '?'; // Rəqibin/AI-nin simvolu
+    let isGameOver = true; // Oyun bitibmi?
+    let boardSize = 3; // Default lövhə ölçüsü
+    let cells = []; // Lövhə hüceyrələrinin DOM elementləri
+    let winningCombination = []; // Qazanan kombinasiyanın indeksləri
+    let player1Roll = null; // Bu clientin zər nəticəsi
+    let player2Roll = null; // Rəqibin/AI-nin zər nəticəsi
+    let diceWinner = null; // Zər atma qalibinin adı (simvol seçimi üçün)
 
     // ---- DOM Elementləri ----
     console.log("DOM elementləri seçilir...");
     const gameLoadingOverlay = document.getElementById('game-loading-overlay');
-    console.log('gameLoadingOverlay:', gameLoadingOverlay ? 'Tapıldı' : 'Tapılmadı!');
     const roomNameDisplay = document.getElementById('room-name');
-    console.log('roomNameDisplay:', roomNameDisplay ? 'Tapıldı' : 'Tapılmadı!');
     const boardElement = document.getElementById('game-board');
-    console.log('boardElement:', boardElement ? 'Tapıldı' : 'Tapılmadı!');
     const turnIndicator = document.getElementById('turn-indicator');
-    console.log('turnIndicator:', turnIndicator ? 'Tapıldı' : 'Tapılmadı!');
     const gameStatusDisplay = document.getElementById('game-status');
-    console.log('gameStatusDisplay:', gameStatusDisplay ? 'Tapıldı' : 'Tapılmadı!');
     const playerXInfo = document.getElementById('player-x-info');
-    console.log('playerXInfo:', playerXInfo ? 'Tapıldı' : 'Tapılmadı!');
     const playerOInfo = document.getElementById('player-o-info');
-    console.log('playerOInfo:', playerOInfo ? 'Tapıldı' : 'Tapılmadı!');
     const playerXSymbolDisplay = document.getElementById('player-x-symbol');
-    console.log('playerXSymbolDisplay:', playerXSymbolDisplay ? 'Tapıldı' : 'Tapılmadı!');
     const playerOSymbolDisplay = document.getElementById('player-o-symbol');
-    console.log('playerOSymbolDisplay:', playerOSymbolDisplay ? 'Tapıldı' : 'Tapılmadı!');
     const playerXNameDisplay = document.getElementById('player-x-name');
-    console.log('playerXNameDisplay:', playerXNameDisplay ? 'Tapıldı' : 'Tapılmadı!');
     const playerONameDisplay = document.getElementById('player-o-name');
-    console.log('playerONameDisplay:', playerONameDisplay ? 'Tapıldı' : 'Tapılmadı!');
     const leaveRoomBtn = document.getElementById('leave-room-btn');
-    console.log('leaveRoomBtn:', leaveRoomBtn ? 'Tapıldı' : 'Tapılmadı!');
     const fireworksOverlay = document.getElementById('fireworks-overlay');
-    console.log('fireworksOverlay:', fireworksOverlay ? 'Tapıldı' : 'Tapılmadı!');
     const shatteringTextContainer = document.getElementById('shattering-text-container');
-    console.log('shatteringTextContainer:', shatteringTextContainer ? 'Tapıldı' : 'Tapılmadı!');
     const editRoomBtn = document.getElementById('edit-room-btn');
-    console.log('editRoomBtn:', editRoomBtn ? 'Tapıldı' : 'Tapılmadı!');
     const editRoomModal = document.getElementById('edit-room-modal');
-    console.log('editRoomModal:', editRoomModal ? 'Tapıldı' : 'Tapılmadı!');
     const closeEditModalButton = editRoomModal?.querySelector('.close-button');
-    console.log('closeEditModalButton:', closeEditModalButton ? 'Tapıldı' : 'Tapılmadı (Modal içində)');
     const saveRoomChangesBtn = document.getElementById('save-room-changes-btn');
-    console.log('saveRoomChangesBtn:', saveRoomChangesBtn ? 'Tapıldı' : 'Tapılmadı!');
     const deleteRoomConfirmBtn = document.getElementById('delete-room-confirm-btn');
-    console.log('deleteRoomConfirmBtn:', deleteRoomConfirmBtn ? 'Tapıldı' : 'Tapılmadı!');
     const editRoomMessage = document.getElementById('edit-room-message');
-    console.log('editRoomMessage:', editRoomMessage ? 'Tapıldı' : 'Tapılmadı!');
     const editBoardSizeSelect = document.getElementById('edit-board-size');
-    console.log('editBoardSizeSelect:', editBoardSizeSelect ? 'Tapıldı' : 'Tapılmadı!');
     const editRoomNameInput = document.getElementById('edit-room-name');
-    console.log('editRoomNameInput:', editRoomNameInput ? 'Tapıldı' : 'Tapılmadı!');
     const editRoomPasswordCheck = document.getElementById('edit-room-password-check');
-    console.log('editRoomPasswordCheck:', editRoomPasswordCheck ? 'Tapıldı' : 'Tapılmadı!');
     const editRoomPasswordInput = document.getElementById('edit-room-password');
-    console.log('editRoomPasswordInput:', editRoomPasswordInput ? 'Tapıldı' : 'Tapılmadı!');
     const restartGameBtn = document.getElementById('restart-game-btn');
-    console.log('restartGameBtn:', restartGameBtn ? 'Tapıldı' : 'Tapılmadı!');
     const kickOpponentBtn = document.getElementById('kick-opponent-btn');
-    console.log('kickOpponentBtn:', kickOpponentBtn ? 'Tapıldı' : 'Tapılmadı!');
-    const callSnowBtn = document.getElementById('call-snow-btn');
-    console.log('callSnowBtn:', callSnowBtn ? 'Tapıldı' : 'Tapılmadı!');
+    const callSnowBtn = document.getElementById('call-snow-btn'); // SNOW düyməsi
     const diceRollModal = document.getElementById('dice-roll-modal');
-    console.log('diceRollModal:', diceRollModal ? 'Tapıldı' : 'Tapılmadı!');
     const diceInstructions = document.getElementById('dice-instructions');
-    console.log('diceInstructions:', diceInstructions ? 'Tapıldı' : 'Tapılmadı!');
     const diceScene = document.getElementById('dice-scene');
-    console.log('diceScene:', diceScene ? 'Tapıldı' : 'Tapılmadı!');
     const diceCubeElement = document.getElementById('dice-cube');
-    console.log('diceCubeElement:', diceCubeElement ? 'Tapıldı' : 'Tapılmadı!');
     const yourRollResultDisplay = document.getElementById('your-roll-result');
-    console.log('yourRollResultDisplay:', yourRollResultDisplay ? 'Tapıldı' : 'Tapılmadı!');
     const opponentRollResultDisplay = document.getElementById('opponent-roll-result');
-    console.log('opponentRollResultDisplay:', opponentRollResultDisplay ? 'Tapıldı' : 'Tapılmadı!');
     const yourRollBox = document.getElementById('your-roll-box');
-    console.log('yourRollBox:', yourRollBox ? 'Tapıldı' : 'Tapılmadı!');
     const opponentRollBox = document.getElementById('opponent-roll-box');
-    console.log('opponentRollBox:', opponentRollBox ? 'Tapıldı' : 'Tapılmadı!');
     const symbolSelectModal = document.getElementById('symbol-select-modal');
-    console.log('symbolSelectModal:', symbolSelectModal ? 'Tapıldı' : 'Tapılmadı!');
     const symbolSelectTitle = document.getElementById('symbol-select-title');
-    console.log('symbolSelectTitle:', symbolSelectTitle ? 'Tapıldı' : 'Tapılmadı!');
     const symbolSelectMessage = document.getElementById('symbol-select-message');
-    console.log('symbolSelectMessage:', symbolSelectMessage ? 'Tapıldı' : 'Tapılmadı!');
     const symbolOptionsDiv = symbolSelectModal?.querySelector('.symbol-options');
-    console.log('symbolOptionsDiv:', symbolOptionsDiv ? 'Tapıldı' : 'Tapılmadı (Modal içində)');
     const symbolWaitingMessage = document.getElementById('symbol-waiting-message');
-    console.log('symbolWaitingMessage:', symbolWaitingMessage ? 'Tapıldı' : 'Tapılmadı!');
     console.log("DOM element seçimi bitdi.");
 
     // ---- Zar Değişkenleri ----
@@ -118,7 +79,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let currentDiceRotateX = 0; let currentDiceRotateY = 0; let currentDiceRotateZ = 0;
     const diceRotations = { 1: { x: 0, y: 0 }, 6: { x: 0, y: 180 }, 4: { x: 0, y: 90 }, 3: { x: 0, y: -90 }, 2: { x: -90, y: 0 }, 5: { x: 90, y: 0 } };
     let isDragging = false; let dragStartX, dragStartY, previousMouseX, previousMouseY;
-    const dragThreshold = 10; const rotateSensitivity = 0.4; let initialCenterZ = -55;
+    const dragThreshold = 10; const rotateSensitivity = 0.4; let initialCenterZ = -55; // Dinamik olaraq hesablanacaq
 
     // ---- Yardımçı Fonksiyonlar ----
     const showModal = (modal) => { if (modal) modal.style.display = 'block'; };
@@ -129,35 +90,191 @@ document.addEventListener('DOMContentLoaded', async () => {
     function hideLoadingOverlay() { if(gameLoadingOverlay) gameLoadingOverlay.classList.remove('visible'); };
 
     // ----- URL Parametrlərini Alma -----
-    function getUrlParams() { const params = new URLSearchParams(window.location.search); const sizeParam = parseInt(params.get('size') || '3', 10); const validatedSize = Math.max(3, Math.min(6, sizeParam)); const urlAiParam = params.get('ai'); const playWithAI = urlAiParam === 'SNOW'; const roomNameParam = decodeURIComponent(params.get('roomName') || 'Bilinməyən Otaq'); const roomIdParam = params.get('roomId'); return { roomId: roomIdParam, roomName: roomNameParam, playerName: decodeURIComponent(params.get('playerName') || 'Qonaq'), size: validatedSize, playWithAI: playWithAI }; }
+    function getUrlParams() {
+        const params = new URLSearchParams(window.location.search);
+        const sizeParam = parseInt(params.get('size') || '3', 10);
+        const validatedSize = Math.max(3, Math.min(6, sizeParam));
+        const urlAiParam = params.get('ai');
+        const playWithAI = urlAiParam === 'SNOW'; // Əgər URL-də ?ai=SNOW varsa, AI oyunu olaraq başla
+        const roomNameParam = decodeURIComponent(params.get('roomName') || 'Bilinməyən Otaq');
+        const roomIdParam = params.get('roomId'); // Real otaq ID-si və ya AI üçün yaradılmış ID
+        return {
+            roomId: roomIdParam,
+            roomName: roomNameParam,
+            playerName: decodeURIComponent(params.get('playerName') || 'Qonaq'), // Bu parametr artıq check-auth ilə gəlir, ehtiyac qalmayıb
+            size: validatedSize,
+            playWithAI: playWithAI // Lobidən birbaşa AI ilə oynamaq üçün
+        };
+    }
 
     // ----- Oyun Vəziyyəti Sıfırlama -----
-    function resetGameStateVars() { board = Array(boardSize * boardSize).fill(''); currentPlayer = ''; player1Symbol = '?'; player2Symbol = '?'; isGameOver = true; winningCombination = []; player1Roll = null; player2Roll = null; diceWinner = null; /*console.log("[resetGameStateVars] Oyun dəyişənləri sıfırlandı.");*/ };
-    function resetBoardAndStatus() { /*console.log("[resetBoardAndStatus] Lövhə və status sıfırlanır.");*/ if (gameStatusDisplay) { gameStatusDisplay.textContent = ''; gameStatusDisplay.className = 'game-status'; } if (turnIndicator) turnIndicator.textContent = 'Gözlənilir...'; cells.forEach((cell, index) => { const newCell = cell.cloneNode(true); newCell.className = 'cell'; newCell.textContent = ''; newCell.style.cursor = 'not-allowed'; newCell.style.animation = ''; cell.parentNode.replaceChild(newCell, cell); cells[index] = newCell; }); updatePlayerInfo(); boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none'; if (restartGameBtn) restartGameBtn.disabled = true; hideFireworks(); clearShatteringText(); };
-
-    // ----- UI Yeniləmələri -----
-    function adjustStylesForBoardSize(size) { let cellSizeVar = '--cell-size-large-dynamic'; if (size === 4) cellSizeVar = '--cell-size-medium-dynamic'; else if (size >= 5) cellSizeVar = '--cell-size-small-dynamic'; document.documentElement.style.setProperty('--current-cell-size', `var(${cellSizeVar})`); document.documentElement.style.setProperty('--current-font-size', `calc(var(${cellSizeVar}) * 0.6)`); document.documentElement.style.setProperty('--board-size', size); };
-    function createBoard() { if (!boardElement) { console.error("createBoard: boardElement tapılmadı!"); return; } boardElement.innerHTML = ''; cells = []; for (let i = 0; i < boardSize * boardSize; i++) { const cell = document.createElement('div'); cell.classList.add('cell'); cell.dataset.index = i; boardElement.appendChild(cell); cells.push(cell); } };
-    function updatePlayerInfo() { if (!playerXInfo || !playerOInfo || !playerXSymbolDisplay || !playerOSymbolDisplay || !playerXNameDisplay || !playerONameDisplay) return; playerXSymbolDisplay.textContent = player1Symbol; playerXNameDisplay.textContent = escapeHtml(currentPlayerName); playerXInfo.className = `player-info ${player1Symbol === 'X' ? 'player-x' : (player1Symbol === 'O' ? 'player-o' : '')}`; playerOSymbolDisplay.textContent = player2Symbol; playerONameDisplay.textContent = escapeHtml(opponentPlayerName); playerOInfo.className = `player-info ${player2Symbol === 'X' ? 'player-x' : (player2Symbol === 'O' ? 'player-o' : '')}`; if (!isGameOver) { playerXInfo.classList.toggle('active-player', currentPlayer === player1Symbol); playerOInfo.classList.toggle('active-player', currentPlayer === player2Symbol); } else { playerXInfo.classList.remove('active-player'); playerOInfo.classList.remove('active-player'); } };
-    function updateTurnIndicator() { if (isGameOver) { if (turnIndicator) turnIndicator.textContent = 'Oyun Bitdi'; return; } if (!currentPlayer) { if (turnIndicator) turnIndicator.textContent = 'Simvol Seçilir...'; return; } const turnPlayerName = (currentPlayer === player1Symbol) ? currentPlayerName : opponentPlayerName; if (turnIndicator) turnIndicator.textContent = `Sıra: ${escapeHtml(turnPlayerName)} (${currentPlayer})`; if (gameStatusDisplay) { gameStatusDisplay.textContent = `Sıra: ${escapeHtml(turnPlayerName)}`; gameStatusDisplay.className = 'game-status'; } updatePlayerInfo(); };
-    function updateHeaderButtonsVisibility() {
-        // console.log(`[updateHeaderButtonsVisibility] Çağırıldı. isAI=${isPlayingAgainstAI}, isCreator=${isCurrentUserCreator}, isOpponent=${isOpponentPresent}`);
-        // console.log('--> editRoomBtn:', editRoomBtn);
-        // console.log('--> kickOpponentBtn:', kickOpponentBtn);
-        // console.log('--> callSnowBtn:', callSnowBtn);
-        const showEdit = !isPlayingAgainstAI && isCurrentUserCreator;
-        const showKick = !isPlayingAgainstAI && isCurrentUserCreator && isOpponentPresent;
-        const showCallSnow = isCurrentUserCreator && !isOpponentPresent && !isPlayingAgainstAI;
-        if (editRoomBtn) { editRoomBtn.style.display = showEdit ? 'inline-flex' : 'none'; } else { /*console.warn("updateHeaderButtonsVisibility: editRoomBtn null idi!");*/ }
-        if (kickOpponentBtn) { kickOpponentBtn.style.display = showKick ? 'inline-flex' : 'none'; } else { /*console.warn("updateHeaderButtonsVisibility: kickOpponentBtn null idi!");*/ }
-        if (callSnowBtn) { callSnowBtn.style.display = showCallSnow ? 'inline-flex' : 'none'; } else { /*console.warn("updateHeaderButtonsVisibility: callSnowBtn null idi!");*/ }
+    function resetGameStateVars() {
+        board = Array(boardSize * boardSize).fill('');
+        currentPlayer = '';
+        player1Symbol = '?';
+        player2Symbol = '?';
+        isGameOver = true;
+        winningCombination = [];
+        player1Roll = null;
+        player2Roll = null;
+        diceWinner = null;
+        // isPlayingAgainstAI və aiPlayerSymbol sıfırlanmır, çünki restart AI oyununu davam etdirə bilər
+        // isOpponentPresent də sıfırlanmır, çünki AI varsa, opponent var sayılır
+        console.log("[resetGameStateVars] Oyun dəyişənləri sıfırlandı (AI statusu qorunur).");
+    };
+    function resetBoardAndStatus() {
+        console.log("[resetBoardAndStatus] Lövhə və status sıfırlanır.");
+        if (gameStatusDisplay) { gameStatusDisplay.textContent = ''; gameStatusDisplay.className = 'game-status'; }
+        if (turnIndicator) turnIndicator.textContent = 'Gözlənilir...';
+        // Hüceyrələri təmizlə və listenerları sil (klonlama ilə)
+        cells.forEach((cell, index) => {
+            const newCell = cell.cloneNode(true);
+            newCell.className = 'cell';
+            newCell.textContent = '';
+            newCell.style.cursor = 'not-allowed';
+            newCell.style.animation = ''; // Animasiyaları sil
+            cell.parentNode.replaceChild(newCell, cell);
+            cells[index] = newCell;
+        });
+        updatePlayerInfo(); // Oyunçu məlumatlarını yenilə (? simvolları ilə)
+        boardElement.style.opacity = '0.5'; // Lövhəni solğunlaşdır
+        boardElement.style.pointerEvents = 'none'; // Klikləməni blokla
+        if (restartGameBtn) restartGameBtn.disabled = true; // Yenidən başlat düyməsini deaktiv et
+        hideFireworks(); // Effektləri gizlət
+        clearShatteringText(); // Mətn effektini təmizlə
     };
 
-// --- Hissə 1 Sonu ---
+// --- Hissə 1/5 Sonu ---
 // public/OYUNLAR/tictactoe/game/oda_ici.js
-// Version: v2.2 - Socket.IO + AI URL + Debug Logs - Hissə 2/5
+// Hissə 2/5 - UI Yeniləmə Funksiyaları
 
-// ---- DOMContentLoaded içində davam edirik (Hissə 1-dən) ----
+    // ----- UI Yeniləmələri -----
+    function adjustStylesForBoardSize(size) {
+        // Lövhə ölçüsünə görə CSS dəyişənlərini (hüceyrə ölçüsü, şrift ölçüsü) tənzimləyir
+        let cellSizeVar = '--cell-size-large-dynamic'; // Default 3x3 üçün
+        if (size === 4) {
+            cellSizeVar = '--cell-size-medium-dynamic';
+        } else if (size >= 5) {
+            cellSizeVar = '--cell-size-small-dynamic';
+        }
+        document.documentElement.style.setProperty('--current-cell-size', `var(${cellSizeVar})`);
+        document.documentElement.style.setProperty('--current-font-size', `calc(var(${cellSizeVar}) * 0.6)`);
+        document.documentElement.style.setProperty('--board-size', size); // Grid layout üçün
+        console.log(`[adjustStylesForBoardSize] Lövhə ölçüsü ${size}x${size} üçün stillər tənzimləndi.`);
+        // Zar ölçüsünü də burada hesablaya bilərik
+         try {
+             const diceSizeValue = getComputedStyle(document.documentElement).getPropertyValue('--dice-size').trim();
+             if (diceSizeValue) initialCenterZ = parseFloat(diceSizeValue.replace('px','')) / -2; else initialCenterZ = -55;
+             console.log(`[adjustStylesForBoardSize] Zar üçün initialCenterZ: ${initialCenterZ}`);
+         } catch(e) {
+             initialCenterZ = -55;
+             console.warn("[adjustStylesForBoardSize] Zar ölçüsü CSS-dən alına bilmədi.");
+         }
+    };
+
+    function createBoard() {
+        // Oyun lövhəsini (hüceyrələri) dinamik olaraq yaradır
+        if (!boardElement) { console.error("createBoard: boardElement tapılmadı!"); return; }
+        boardElement.innerHTML = ''; // Köhnə hüceyrələri təmizlə
+        cells = []; // Hüceyrə massivini sıfırla
+        const cellCount = boardSize * boardSize;
+        console.log(`[createBoard] ${boardSize}x${boardSize} ölçülü (${cellCount} hüceyrə) lövhə yaradılır...`);
+        for (let i = 0; i < cellCount; i++) {
+            const cell = document.createElement('div');
+            cell.classList.add('cell');
+            cell.dataset.index = i; // Hər hüceyrəyə indeksini verək
+            cell.style.cursor = 'not-allowed'; // Başlanğıcda klikləməni bağla
+            boardElement.appendChild(cell);
+            cells.push(cell); // Yeni hüceyrəni massivə əlavə et
+        }
+        console.log(`[createBoard] ${cells.length} hüceyrə yaradıldı.`);
+    };
+
+    function updatePlayerInfo() {
+        // Oyunçu məlumatlarını (ad, simvol, aktiv sıra) UI-də yeniləyir
+        if (!playerXInfo || !playerOInfo || !playerXSymbolDisplay || !playerOSymbolDisplay || !playerXNameDisplay || !playerONameDisplay) {
+             console.warn("updatePlayerInfo: Bəzi oyunçu məlumat elementləri tapılmadı.");
+             return;
+        }
+        // Player 1 (Bu Client)
+        playerXSymbolDisplay.textContent = player1Symbol; // X və ya O
+        playerXNameDisplay.textContent = escapeHtml(currentPlayerName); // Oyunçu adı
+        playerXInfo.className = `player-info ${player1Symbol === 'X' ? 'player-x' : (player1Symbol === 'O' ? 'player-o' : '')}`; // Simvola görə klas
+
+        // Player 2 (Rəqib / AI)
+        playerOSymbolDisplay.textContent = player2Symbol; // X və ya O
+        playerONameDisplay.textContent = escapeHtml(opponentPlayerName); // Rəqib adı / "SNOW" / "Gözlənilir..."
+        playerOInfo.className = `player-info ${player2Symbol === 'X' ? 'player-x' : (player2Symbol === 'O' ? 'player-o' : '')}`;
+
+        // Aktiv sıranı göstər (əgər oyun bitməyibsə)
+        if (!isGameOver) {
+            playerXInfo.classList.toggle('active-player', currentPlayer === player1Symbol);
+            playerOInfo.classList.toggle('active-player', currentPlayer === player2Symbol);
+        } else {
+            // Oyun bitibsə, aktiv sıranı hər ikisindən qaldır
+            playerXInfo.classList.remove('active-player');
+            playerOInfo.classList.remove('active-player');
+        }
+        // console.log("[updatePlayerInfo] Oyunçu məlumatları yeniləndi.");
+    };
+
+    function updateTurnIndicator() {
+        // Üst tərəfdəki sıra göstəricisini yeniləyir
+        if (!turnIndicator) return;
+
+        if (isGameOver) {
+            if (gameStatusDisplay?.textContent && !gameStatusDisplay.textContent.includes("Qazandı") && !gameStatusDisplay.textContent.includes("Bərabərə")) {
+                 // Oyun bitibsə amma status mesajı yoxdursa (məs. rəqib ayrıldı)
+                 turnIndicator.textContent = 'Oyun Bitdi';
+            } else if (gameStatusDisplay?.textContent) {
+                 // Oyun bitibsə və status mesajı varsa, onu göstər
+                 turnIndicator.textContent = gameStatusDisplay.textContent;
+            } else {
+                 turnIndicator.textContent = 'Oyun Bitdi';
+            }
+            return;
+        }
+        if (!currentPlayer) {
+            // Simvol hələ seçilməyibsə (zər atılır və ya simvol seçilir)
+            turnIndicator.textContent = 'Simvol Seçilir...';
+            return;
+        }
+        // Sırası olan oyunçunun adını və simvolunu göstər
+        const turnPlayerName = (currentPlayer === player1Symbol) ? currentPlayerName : opponentPlayerName;
+        turnIndicator.textContent = `Sıra: ${escapeHtml(turnPlayerName)} (${currentPlayer})`;
+
+        // Aşağıdakı status mesajını da yeniləyək (əgər varsa)
+        if (gameStatusDisplay) {
+            gameStatusDisplay.textContent = `Sıra: ${escapeHtml(turnPlayerName)}`;
+            gameStatusDisplay.className = 'game-status'; // Əvvəlki win/draw klaslarını təmizlə
+        }
+        updatePlayerInfo(); // Aktiv oyunçu fonunu yeniləmək üçün
+        // console.log("[updateTurnIndicator] Sıra göstəricisi yeniləndi.");
+    };
+
+    function updateHeaderButtonsVisibility() {
+        // Başlıqdakı düymələrin (Otaq Ayarları, Rəqibi Çıxart, SNOW'u Çağır) görünüşünü idarə edir
+        // console.log(`[updateHeaderButtonsVisibility] Çağırıldı. isAI=${isPlayingAgainstAI}, isCreator=${isCurrentUserCreator}, isOpponent=${isOpponentPresent}`);
+
+        // Otaq Ayarları (yalnız yaradan, AI olmayan oyunda)
+        const showEdit = !isPlayingAgainstAI && isCurrentUserCreator;
+        // Rəqibi Çıxart (yalnız yaradan, rəqib varsa, AI olmayan oyunda)
+        const showKick = !isPlayingAgainstAI && isCurrentUserCreator && isOpponentPresent;
+        // SNOW'u Çağır (yalnız yaradan, rəqib yoxdursa, AI olmayan oyunda) --- DÜZƏLİŞ EDİLDİ ---
+        const showCallSnow = isCurrentUserCreator && !isOpponentPresent && !isPlayingAgainstAI;
+
+        if (editRoomBtn) { editRoomBtn.style.display = showEdit ? 'inline-flex' : 'none'; } else { console.warn("updateHeaderButtonsVisibility: editRoomBtn null idi!"); }
+        if (kickOpponentBtn) { kickOpponentBtn.style.display = showKick ? 'inline-flex' : 'none'; } else { console.warn("updateHeaderButtonsVisibility: kickOpponentBtn null idi!"); }
+        if (callSnowBtn) {
+            callSnowBtn.style.display = showCallSnow ? 'inline-flex' : 'none';
+            callSnowBtn.disabled = !showCallSnow; // Görünmürsə, deaktiv də olsun
+        } else { console.warn("updateHeaderButtonsVisibility: callSnowBtn null idi!"); }
+        // console.log(`[updateHeaderButtonsVisibility] Düymə görünüşləri: Edit=${showEdit}, Kick=${showKick}, CallSnow=${showCallSnow}`);
+    };
+
+// --- Hissə 2/5 Sonu ---
+// public/OYUNLAR/tictactoe/game/oda_ici.js
+// Hissə 3/5 - Zər Funksiyaları
 
     // ----- Zər Funksiyaları -----
     function initDice() {
@@ -213,8 +330,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         player1Roll = myRoll; // Nəticəni saxla
 
         // Animasiya parametrləri
-        const rollDurationValue = getComputedStyle(document.documentElement).getPropertyValue('--roll-duration').trim() || '2.0s';
-        const rollTimingFunctionValue = getComputedStyle(document.documentElement).getPropertyValue('--roll-timing-function').trim() || 'cubic-bezier(0.3, 0.9, 0.4, 1)';
+        let rollDurationValue = '2.0s';
+        let rollTimingFunctionValue = 'cubic-bezier(0.3, 0.9, 0.4, 1)';
+         try {
+             rollDurationValue = getComputedStyle(document.documentElement).getPropertyValue('--roll-duration').trim() || '2.0s';
+             rollTimingFunctionValue = getComputedStyle(document.documentElement).getPropertyValue('--roll-timing-function').trim() || 'cubic-bezier(0.3, 0.9, 0.4, 1)';
+         } catch (e) { console.warn("CSS dəyişənləri alına bilmədi."); }
+
         const finalFace = diceRotations[myRoll]; // Hədəf üz
         // Təsadüfi tam dövrələr əlavə et
         const fullRotationsX = 360 * (2 + Math.floor(Math.random() * 2));
@@ -257,9 +379,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 handleRollOffResults(myRoll, opponentRollValue); // Nəticələri dərhal emal et
             } else {
                 // Multiplayer oyununda rəqibin nəticəsini gözləyirik
-                // console.log("[rollDice] Rəqibin zər nəticəsi gözlənilir...");
                  if (player2Roll !== null) { // Əgər rəqibin nəticəsi artıq gəlibsə
-                      // console.log("[rollDice] Rəqibin nəticəsi artıq gəlib, handleRollOffResults çağırılır.");
+                      console.log("[rollDice] Rəqibin nəticəsi artıq gəlib, handleRollOffResults çağırılır.");
                       handleRollOffResults(myRoll, player2Roll);
                  } else {
                      if(diceInstructions) diceInstructions.textContent = 'Rəqibin zər atması gözlənilir...';
@@ -298,7 +419,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             isDiceRolling = false; // Yenidən atmaq mümkün olsun
             if (isOpponentPresent && diceCubeElement) diceCubeElement.style.cursor = 'grab'; // Zəri aktiv et
         }
-        // console.log(`[handleRollOffResults] Qalib: ${diceWinner === null ? 'Bərabərlik' : diceWinner}`);
+        console.log(`[handleRollOffResults] Qalib: ${diceWinner === null ? 'Bərabərlik' : diceWinner}`);
     }
 
     function triggerDiceScatterAndSymbolSelect() {
@@ -339,18 +460,16 @@ document.addEventListener('DOMContentLoaded', async () => {
              rollDice(); // Zəri at
         }
     }
-    function handleMouseDown(event) { if (isDiceRolling || !isOpponentPresent) return; diceCubeElement.style.transition = 'none'; isDragging = false; dragStartX = event.clientX; dragStartY = event.clientY; previousMouseX = event.clientX; previousMouseY = event.clientY; window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); };
-    function handleMouseMove(event) { if (isDiceRolling) return; const deltaX = event.clientX - previousMouseX; const deltaY = event.clientY - previousMouseY; if (!isDragging) { if (Math.abs(event.clientX - dragStartX) > dragThreshold || Math.abs(event.clientY - dragStartY) > dragThreshold) { isDragging = true; if(diceCubeElement) diceCubeElement.style.cursor = 'grabbing'; } } if (isDragging) { currentDiceRotateY += deltaX * rotateSensitivity; currentDiceRotateX -= deltaY * rotateSensitivity; setDiceTransform(currentDiceRotateX, currentDiceRotateY, currentDiceRotateZ); } previousMouseX = event.clientX; previousMouseY = event.clientY; };
+    function handleMouseDown(event) { if (isDiceRolling || !isOpponentPresent) return; if(!diceCubeElement) return; diceCubeElement.style.transition = 'none'; isDragging = false; dragStartX = event.clientX; dragStartY = event.clientY; previousMouseX = event.clientX; previousMouseY = event.clientY; window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); };
+    function handleMouseMove(event) { if (isDiceRolling || !isDragging) return; const deltaX = event.clientX - previousMouseX; const deltaY = event.clientY - previousMouseY; currentDiceRotateY += deltaX * rotateSensitivity; currentDiceRotateX -= deltaY * rotateSensitivity; setDiceTransform(currentDiceRotateX, currentDiceRotateY, currentDiceRotateZ); previousMouseX = event.clientX; previousMouseY = event.clientY; };
     function handleMouseUp(event) { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); handleDiceClickOrDragEnd(); };
-    function handleTouchStart(e) { if (isDiceRolling || !isOpponentPresent) return; diceCubeElement.style.transition = 'none'; isDragging = false; const touch = e.touches[0]; dragStartX = touch.clientX; dragStartY = touch.clientY; previousMouseX = touch.clientX; previousMouseY = touch.clientY; diceCubeElement.addEventListener('touchmove', handleTouchMove, { passive: false }); diceCubeElement.addEventListener('touchend', handleTouchEnd); diceCubeElement.addEventListener('touchcancel', handleTouchEnd); };
+    function handleTouchStart(e) { if (isDiceRolling || !isOpponentPresent) return; if(!diceCubeElement) return; diceCubeElement.style.transition = 'none'; isDragging = false; const touch = e.touches[0]; dragStartX = touch.clientX; dragStartY = touch.clientY; previousMouseX = touch.clientX; previousMouseY = touch.clientY; diceCubeElement.addEventListener('touchmove', handleTouchMove, { passive: false }); diceCubeElement.addEventListener('touchend', handleTouchEnd); diceCubeElement.addEventListener('touchcancel', handleTouchEnd); };
     function handleTouchMove(e) { if (isDiceRolling) return; e.preventDefault(); const touch = e.touches[0]; const deltaX = touch.clientX - previousMouseX; const deltaY = touch.clientY - previousMouseY; if (!isDragging) { if (Math.abs(touch.clientX-dragStartX)>dragThreshold || Math.abs(touch.clientY-dragStartY)>dragThreshold) { isDragging = true; } } if (isDragging) { currentDiceRotateY += deltaX*rotateSensitivity; currentDiceRotateX -= deltaY*rotateSensitivity; setDiceTransform(currentDiceRotateX, currentDiceRotateY, currentDiceRotateZ); } previousMouseX = touch.clientX; previousMouseY = touch.clientY; };
-    function handleTouchEnd(e) { diceCubeElement.removeEventListener('touchmove', handleTouchMove); diceCubeElement.removeEventListener('touchend', handleTouchEnd); diceCubeElement.removeEventListener('touchcancel', handleTouchEnd); handleDiceClickOrDragEnd(); };
+    function handleTouchEnd(e) { if(!diceCubeElement) return; diceCubeElement.removeEventListener('touchmove', handleTouchMove); diceCubeElement.removeEventListener('touchend', handleTouchEnd); diceCubeElement.removeEventListener('touchcancel', handleTouchEnd); handleDiceClickOrDragEnd(); };
 
-// --- Hissə 2 Sonu ---
+// --- Hissə 3/5 Sonu ---
 // public/OYUNLAR/tictactoe/game/oda_ici.js
-// Version: v2.2 - Socket.IO + AI URL + Debug Logs - Hissə 3/5
-
-// ---- DOMContentLoaded içində davam edirik (Hissə 2-dən) ----
+// Hissə 4/5 - Simvol Seçimi, Oyun Başlama, Oyun Axışı, AI Məntiqi
 
     // ----- Simvol Seçim Funksiyaları -----
     function initSymbolSelection() {
@@ -362,7 +481,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
         symbolWaitingMessage.style.display = 'none'; // Gözləmə mesajını gizlət
-        symbolOptionsDiv.style.display = 'flex'; // Seçim düymələrini göstər
+        symbolOptionsDiv.style.display = 'flex';    // Seçim düymələrini göstər
 
         if (diceWinner === currentPlayerName) { // Əgər bu client zəri udubsa
             symbolSelectTitle.textContent = "Simvol Seçin";
@@ -413,9 +532,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         setTimeout(() => {
              // Əgər modal hələ də açıqdırsa (istifadəçi gözləyirsə)
              if (symbolSelectModal && symbolSelectModal.style.display === 'block') {
+                 // Rəqibin seçdiyi simvolu serverə göndərməyə ehtiyac yoxdur (AI-dır)
                  startGameProcedure(opponentChoice); // Oyunu başlat
              } else {
-                  // Bu hal, əgər istifadəçi modalı özü bağlayıbsa baş verə bilər
                   console.warn("[simulateOpponentSymbolChoice] Simvol seçim modalı artıq bağlı idi.");
              }
         }, delay); // Verilən gecikmə qədər gözlə
@@ -462,6 +581,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (board[index] === '') { // Yalnız boş hüceyrələr üçün
                  cells[index].style.cursor = 'pointer';
+                 // Listenerın təkrar əlavə olunmadığından əmin olmaq çətindir,
+                 // amma klonlama bu problemi həll edir.
                  cells[index].addEventListener('click', handleCellClick);
             } else {
                  cells[index].style.cursor = 'not-allowed';
@@ -473,15 +594,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!isGameOver) {
              const isMyTurn = currentPlayer === player1Symbol;
              // Multiplayerdə sıra rəqibdədirsə, lövhəni blokla
-             boardElement.style.pointerEvents = (!isPlayingAgainstAI && !isMyTurn) ? 'none' : 'auto';
+             // AI oyununda isə sıra AI-dədirsə, lövhəni blokla
+             boardElement.style.pointerEvents = !isMyTurn ? 'none' : 'auto';
 
              // Əgər AI başlayırsa, ilk hərəkəti etsin
              if (isPlayingAgainstAI && currentPlayer === aiPlayerSymbol) {
                  console.log("[startGameProcedure] AI başlayır, makeAIMove çağırılır.");
-                 boardElement.style.pointerEvents = 'none'; // AI düşünərkən blokla
-                 makeAIMove();
+                 makeAIMove(); // Bu funksiya özü lövhəni bloklayıb sonra açacaq
              } else {
-                 console.log(`[startGameProcedure] ${isMyTurn ? 'İnsan' : 'Rəqib'} başlayır. Lövhə: ${boardElement.style.pointerEvents}`);
+                 console.log(`[startGameProcedure] ${isMyTurn ? 'İnsan' : 'Rəqib'} başlayır. Lövhə aktivliyi: ${boardElement.style.pointerEvents}`);
              }
         } else {
              boardElement.style.pointerEvents = 'none'; // Oyun bitibsə blokla
@@ -504,49 +625,50 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log(`[handleCellClick] İnsan ${index} xanasına ${player1Symbol} qoyur.`);
 
         // Hərəkəti lövhəyə yerləşdir (bu funksiya sıranı dəyişdirmir)
-        placeMark(index, player1Symbol);
+        const moveMadeSuccessfully = placeMark(index, player1Symbol);
 
-        // Əgər hərəkət oyunu bitirmədisə
-        if (!isGameOver) {
+        // Əgər hərəkət uğurlu oldusa və oyunu bitirmədisə
+        if (moveMadeSuccessfully && !isGameOver) {
             if (isPlayingAgainstAI) {
                 // AI Oyununda: Sıranı AI-yə ver və hərəkət et
-                // console.log("[handleCellClick] AI Oyunu: Sıra AI-ya keçirilir.");
+                console.log("[handleCellClick] AI Oyunu: Sıra AI-ya keçirilir.");
                 switchPlayer(); // Sıranı dəyişdir
                 updateTurnIndicator(); // UI-ni yenilə
                 boardElement.style.pointerEvents = 'none'; // Lövhəni blokla
                 makeAIMove(); // AI hərəkət etsin
             } else {
                 // Multiplayer Oyununda: Hərəkəti serverə göndər
-                // console.log(`[handleCellClick] Multiplayer: Hərəkət (${index}, ${player1Symbol}) serverə göndərilir ('make_move')...`);
+                console.log(`[handleCellClick] Multiplayer: Hərəkət (${index}, ${player1Symbol}) serverə göndərilir ('make_move')...`);
                 if (socket && socket.connected) {
                      socket.emit('make_move', { index: index, mark: player1Symbol });
                      boardElement.style.pointerEvents = 'none'; // Lövhəni blokla (rəqibi gözlə)
                      switchPlayer(); // Sıranı UI-də dəyişdir
                      updateTurnIndicator(); // UI-ni yenilə
-                      if (gameStatusDisplay) gameStatusDisplay.textContent = `Sıra: ${opponentPlayerName}`; // Statusu yenilə
+                     if (gameStatusDisplay) gameStatusDisplay.textContent = `Sıra: ${opponentPlayerName}`; // Statusu yenilə
                 } else {
-                     // Socket bağlıdırsa, hərəkəti geri al
+                     // Socket bağlıdırsa, hərəkəti geri al (ehtiyat üçün)
                      console.error("[handleCellClick] Socket bağlantısı yoxdur!");
                      board[index] = ''; // Lövhədən sil
                      clickedCell.textContent = ''; // Vizual olaraq sil
                      clickedCell.classList.remove(player1Symbol); // Klası sil
                      clickedCell.style.cursor = 'pointer'; // Yenidən kliklənə bilən et
+                     // Listenerı yenidən əlavə etmək üçün klonlama lazımdır, amma bu kompleksdir, sadəcə alert verək
                      alert("Serverlə bağlantı yoxdur. Hərəkət edilə bilmədi.");
                 }
             }
-        } else {
+        } else if (moveMadeSuccessfully && isGameOver) {
             // Oyun bu hərəkətlə bitdi
              console.log("[handleCellClick] Oyun insanın hərəkəti ilə bitdi.");
              boardElement.style.pointerEvents = 'none'; // Lövhəni blokla
         }
+        // Əgər moveMadeSuccessfully false idisə (placeMark xətası), heç nə etmə
     }
 
     function placeMark(index, mark) {
         // Verilən işarəni lövhəyə yerləşdirir və oyunun bitib-bitmədiyini yoxlayır
-        // Bu funksiya özü sıranı dəyişdirmir!
         // console.log(`===== placeMark: Index=${index}, Mark=${mark} =====`);
         if (index < 0 || index >= board.length || board[index] !== '' || isGameOver) {
-             // console.log(`placeMark: Keçərsiz. Index=${index}, BoardVal=${board[index]}, GameOver=${isGameOver}`);
+             console.warn(`placeMark: Keçərsiz hərəkət cəhdi. Index=${index}, BoardVal=${board[index]}, GameOver=${isGameOver}`);
              return false; // Keçərsiz hərəkət
         }
         board[index] = mark; // Lövhəni yenilə
@@ -558,7 +680,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         cellElement.classList.add(mark); // 'X' və ya 'O' klası
         cellElement.style.cursor = 'not-allowed';
 
-        // Listenerları silmək üçün klonlama (event listener sızmasının qarşısını alır)
+        // Listenerları silmək üçün klonlama (əgər varsa)
+        // Əgər startGameProcedure-də onsuz da klonlanıbsa, burada təkrar ehtiyac olmaya bilər,
+        // amma kliklənən hüceyrənin listenerını qaldırmaq üçün edək.
         const newCell = cellElement.cloneNode(true);
         cellElement.parentNode.replaceChild(newCell, cellElement);
         cells[index] = newCell; // Yeni elementi massivdə saxla
@@ -567,7 +691,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Qazanma və bərabərlik yoxlaması
         const win = checkWin(mark);
-        const draw = !win && !board.includes(''); // Qazanma yoxdursa və boş xana qalmayıbsa
+        const draw = !win && !board.includes('');
 
         if (win) {
             console.log(`placeMark: ${mark} qazandı.`);
@@ -596,7 +720,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function makeAIMove() {
         // AI-nin hərəkətini hesablayır və yerləşdirir
         if (isGameOver || currentPlayer !== aiPlayerSymbol) {
-            // console.log(`[makeAIMove] Bloklandı (GameOver=${isGameOver}, Current=${currentPlayer}, AISymbol=${aiPlayerSymbol})`);
+            console.log(`[makeAIMove] Bloklandı (GameOver=${isGameOver}, Current=${currentPlayer}, AISymbol=${aiPlayerSymbol})`);
             if (!isGameOver && boardElement) boardElement.style.pointerEvents = 'auto'; // Lövhəni aktivləşdir (əgər sıradan çıxıbsa)
             return;
         }
@@ -611,35 +735,41 @@ document.addEventListener('DOMContentLoaded', async () => {
                  bestMove = findBestMove(); // Ən yaxşı hərəkəti tap
                  // console.log("[makeAIMove] AI üçün ən yaxşı hərəkət tapıldı:", bestMove);
             } catch (aiError) {
-                 // Xəta olarsa, təsadüfi hərəkət et
                  console.error("[makeAIMove] findBestMove xətası:", aiError);
                  let availableCells = []; for(let i=0; i<board.length; i++) if(board[i]==='') availableCells.push(i);
                  if (availableCells.length > 0) bestMove = availableCells[Math.floor(Math.random() * availableCells.length)];
                  console.error("[makeAIMove] Xəta səbəbiylə təsadüfi hərəkət:", bestMove);
             }
 
-            // Əgər etibarlı hərəkət tapılıbsa
             if (bestMove !== -1 && board[bestMove] === '') {
-                placeMark(bestMove, aiPlayerSymbol); // Hərəkəti yerləşdir
-                if (!isGameOver) { // Əgər oyun bitmədisə
-                    // console.log("[makeAIMove] AI hərəkət etdi, sıra insana keçir.");
+                const moveMadeSuccessfully = placeMark(bestMove, aiPlayerSymbol); // Hərəkəti yerləşdir
+                if (moveMadeSuccessfully && !isGameOver) { // Əgər hərəkət edildi və oyun bitmədisə
+                    console.log("[makeAIMove] AI hərəkət etdi, sıra insana keçir.");
                     switchPlayer(); // Sıranı insana ver
                     if (boardElement) boardElement.style.pointerEvents = 'auto'; // Lövhəni aktiv et
                     updateTurnIndicator(); // UI-ni yenilə
-                } else {
+                } else if (moveMadeSuccessfully && isGameOver) {
                      console.log("[makeAIMove] AI hərəkət etdi və oyun bitdi.");
+                     if (boardElement) boardElement.style.pointerEvents = 'none'; // Lövhəni blokla
+                     updateTurnIndicator(); // Oyun bitdi statusunu göstər
+                } else {
+                     // placeMark false qaytardı (nadir hal)
+                      console.error(`[makeAIMove] placeMark uğursuz oldu! Move: ${bestMove}`);
+                      if (boardElement) boardElement.style.pointerEvents = 'auto'; // Lövhəni açmağa çalış
+                      updateTurnIndicator(); // UI-ni yenilə
                 }
             } else {
-                // Etibarlı hərəkət tapılmadı (çox nadir hal)
-                console.warn(`[makeAIMove] Etibarlı hərəkət tapılmadı (${bestMove})!`);
+                // Etibarlı hərəkət tapılmadı (bərabərlik və ya xəta)
+                console.warn(`[makeAIMove] Etibarlı hərəkət tapılmadı (${bestMove})! Lövhə:`, [...board]);
                  if (boardElement) boardElement.style.pointerEvents = 'auto'; // Lövhəni aktiv et
-                 // Bərabərlik yoxlaması
+                 // Bərabərlik yoxlaması (qazanma yoxdursa və boş xana qalmayıbsa)
                  if(!checkWin(player1Symbol) && !board.includes('')) {
                       console.log("[makeAIMove] Bərabərlik (hərəkət yoxdur).");
-                      endGame(true, null);
+                      if (!isGameOver) endGame(true, null); // Oyunu bitir (əgər hələ bitməyibsə)
+                      updateTurnIndicator();
                  } else {
-                      console.warn("[makeAIMove] Hərəkət yoxdur amma oyun bitməyib?");
-                      updateTurnIndicator(); // Sıranı göstər
+                      console.warn("[makeAIMove] Hərəkət yoxdur amma oyun bitməyib və ya bərabərlik deyil?");
+                      updateTurnIndicator(); // Sıranı göstər (bəlkə də ilişib?)
                  }
             }
              // console.log("[makeAIMove] AI setTimeout callback bitdi.");
@@ -649,31 +779,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     function findBestMove() {
         // AI üçün ən yaxşı hərəkəti tapan funksiya (Minimax və sadə strategiyalar)
         // console.log(`%c[findBestMove] Başladı. boardSize=${boardSize}, AI Symbol=${aiPlayerSymbol}`, "color: cyan");
-        const humanPlayerSymbol = player1Symbol;
+        const humanPlayerSymbol = (aiPlayerSymbol === player1Symbol) ? player2Symbol : player1Symbol; // Düzgün insan simvolunu tap
 
-        // 1. Qazanma Hərəkəti (Bir hərəkətlə udmaq mümkündürsə)
-        for (let i = 0; i < board.length; i++) {
-             if (board[i] === '') { board[i] = aiPlayerSymbol; if (checkWin(aiPlayerSymbol)) { board[i] = ''; return i; } board[i] = ''; }
-        }
-
-        // 2. Bloklama Hərəkəti (Rəqibin bir hərəkətlə udmasının qarşısını al)
-        for (let i = 0; i < board.length; i++) {
-             if (board[i] === '') { board[i] = humanPlayerSymbol; if (checkWin(humanPlayerSymbol)) { board[i] = ''; return i; } board[i] = ''; }
-        }
+        // 1. Qazanma Hərəkəti
+        for (let i = 0; i < board.length; i++) { if (board[i] === '') { board[i] = aiPlayerSymbol; if (checkWin(aiPlayerSymbol)) { board[i] = ''; /*console.log("AI Move: Win");*/ return i; } board[i] = ''; } }
+        // 2. Bloklama Hərəkəti
+        for (let i = 0; i < board.length; i++) { if (board[i] === '') { board[i] = humanPlayerSymbol; if (checkWin(humanPlayerSymbol)) { board[i] = ''; /*console.log("AI Move: Block");*/ return i; } board[i] = ''; } }
 
         // 3. Sadə Strategiyalar (Böyük lövhələr üçün Minimax yerinə)
         if (boardSize >= 5) {
              // Mərkəzi xanaları prioritetləşdir
              const centerCells = getCenterCells(boardSize);
              const availableCenter = centerCells.filter(index => board[index] === '');
-             if (availableCenter.length > 0) return availableCenter[Math.floor(Math.random() * availableCenter.length)];
-             // TODO: Daha mürəkkəb strategiyalar əlavə etmək olar (çəngəl yaratma/bloklama)
+             if (availableCenter.length > 0) { /*console.log("AI Move: Center");*/ return availableCenter[Math.floor(Math.random() * availableCenter.length)];}
+             // TODO: Çəngəl yaratma/bloklama kimi daha mürəkkəb strategiyalar əlavə et
         }
         // 4. Minimax (Kiçik lövhələr üçün)
         else if (boardSize <= 4) {
             let move = -1; let score = -Infinity;
-            let currentMaxDepth = (boardSize === 4) ? 4 : 6; // 4x4 üçün dərinliyi məhdudlaşdırırıq
+            let currentMaxDepth = (boardSize === 4) ? 4 : 7; // 3x3 üçün dərinliyi artıraq, 4x4 üçün məhdud
             const availableMoves = []; for(let i=0; i<board.length; i++) { if(board[i] === '') availableMoves.push(i); }
+             // console.log(`Minimax running. Depth=${currentMaxDepth}, Moves=${availableMoves.length}`);
+             // Boş lövhədə ilk gedişi optimallaşdır (mərkəz və ya künc)
+            if (availableMoves.length === board.length) {
+                const corners = [0, boardSize-1, (boardSize-1)*boardSize, boardSize*boardSize-1];
+                const center = getCenterCells(boardSize);
+                const firstMoves = [...center, ...corners];
+                return firstMoves[Math.floor(Math.random() * firstMoves.length)];
+            }
 
             for (const i of availableMoves) {
                 board[i] = aiPlayerSymbol;
@@ -681,12 +814,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 board[i] = '';
                 if (currentScore > score) { score = currentScore; move = i; }
             }
-            if (move !== -1) return move;
+            if (move !== -1) { /*console.log(`AI Move: Minimax (score ${score})`);*/ return move; }
         }
 
-        // 5. Təsadüfi Etibarlı Hərəkət (Əgər yuxarıdakılar işləməzsə)
+        // 5. Təsadüfi Etibarlı Hərəkət
         let availableCells = []; for (let i = 0; i < board.length; i++) { if (board[i] === '') availableCells.push(i); }
-        if (availableCells.length > 0) return availableCells[Math.floor(Math.random() * availableCells.length)];
+        if (availableCells.length > 0) { /*console.log("AI Move: Random");*/ return availableCells[Math.floor(Math.random() * availableCells.length)]; }
 
         console.error("[findBestMove] Heç bir hərəkət tapılmadı!");
         return -1; // Hərəkət tapılmadı
@@ -694,92 +827,151 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function getCenterCells(size) { const centerIndices = []; const isOdd = size % 2 !== 0; if (isOdd) { const center = Math.floor(size / 2); centerIndices.push(center * size + center); } else { const c1 = size / 2 - 1; const c2 = size / 2; centerIndices.push(c1 * size + c1); centerIndices.push(c1 * size + c2); centerIndices.push(c2 * size + c1); centerIndices.push(c2 * size + c2); } return centerIndices; };
     function minimax(currentBoard, depth, isMaximizing, humanSymbol, aiSymbol, maxDepth) { let winner = checkWinnerForMinimax(currentBoard, humanSymbol, aiSymbol); if (winner === aiSymbol) return 10 - depth; if (winner === humanSymbol) return depth - 10; if (!currentBoard.includes('')) return 0; if (depth >= maxDepth) return 0; if (isMaximizing) { let bestScore = -Infinity; for (let i = 0; i < currentBoard.length; i++) { if (currentBoard[i] === '') { currentBoard[i] = aiSymbol; bestScore = Math.max(bestScore, minimax(currentBoard, depth + 1, false, humanSymbol, aiSymbol, maxDepth)); currentBoard[i] = ''; } } return bestScore; } else { let bestScore = Infinity; for (let i = 0; i < currentBoard.length; i++) { if (currentBoard[i] === '') { currentBoard[i] = humanSymbol; bestScore = Math.min(bestScore, minimax(currentBoard, depth + 1, true, humanSymbol, aiSymbol, maxDepth)); currentBoard[i] = ''; } } return bestScore; } };
-    function checkWinnerForMinimax(currentBoard, humanSymbol, aiSymbol) { const winConditions = generateWinConditions(boardSize); for (const condition of winConditions) { const cell1 = currentBoard[condition[0]]; if (cell1 !== '' && condition.every(index => currentBoard[index] === cell1)) return cell1; } return null; };
+    function checkWinnerForMinimax(currentBoard, humanSymbol, aiSymbol) { const winConditions = generateWinConditions(boardSize); for (const condition of winConditions) { const firstSymbol = currentBoard[condition[0]]; if (firstSymbol !== '' && condition.every(index => currentBoard[index] === firstSymbol)) { return firstSymbol; } } return null; };
+
+// --- Hissə 4/5 Sonu ---
+// public/OYUNLAR/tictactoe/game/oda_ici.js
+// Hissə 5/5 - Oyun Sonu, Effektlər, Otaq Əməliyyatları, Socket, Başlatma
 
     // ----- Qazanma/Bərabərlik Yoxlaması -----
-    function checkWin(playerSymbolToCheck) { winningCombination = []; const winConditions = generateWinConditions(boardSize); for (let i = 0; i < winConditions.length; i++) { const condition = winConditions[i]; const firstSymbol = board[condition[0]]; if (firstSymbol !== playerSymbolToCheck || firstSymbol === '') continue; let allSame = true; for (let j = 1; j < condition.length; j++) { if (board[condition[j]] !== firstSymbol) { allSame = false; break; } } if (allSame) { winningCombination = condition; return true; } } return false; };
-    function generateWinConditions(size) { const conditions = []; const winLength = (size === 3 || size === 4) ? 3 : 4; for (let r = 0; r < size; r++) { for (let c = 0; c < size; c++) { if (c <= size - winLength) { const rowC = []; for (let k = 0; k < winLength; k++) rowC.push(r*size+(c+k)); conditions.push(rowC); } if (r <= size - winLength) { const colC = []; for (let k = 0; k < winLength; k++) colC.push((r+k)*size+c); conditions.push(colC); } if (r <= size - winLength && c <= size - winLength) { const dia1C = []; for (let k = 0; k<winLength; k++) dia1C.push((r+k)*size+(c+k)); conditions.push(dia1C); } if (r <= size - winLength && c >= winLength - 1) { const dia2C = []; for (let k = 0; k<winLength; k++) dia2C.push((r+k)*size+(c-k)); conditions.push(dia2C); } } } const uniqueConditions = conditions.map(cond => JSON.stringify(cond.sort((a,b)=>a-b))); return [...new Set(uniqueConditions)].map(str => JSON.parse(str)); };
-    function checkDraw() { return !board.includes(''); };
-    function highlightWinningCells() { winningCombination.forEach(index => { if(cells[index]) cells[index].classList.add('winning'); }); };
+    function checkWin(playerSymbolToCheck) {
+        // Verilən simvol üçün qazanma vəziyyətini yoxlayır
+        winningCombination = []; // Əvvəlki qazanmanı təmizlə
+        const winConditions = generateWinConditions(boardSize);
+        for (let i = 0; i < winConditions.length; i++) {
+            const condition = winConditions[i];
+            const firstSymbol = board[condition[0]];
+            // Yalnız yoxlanılan simvolla başlayan və boş olmayan xanaları nəzərə al
+            if (firstSymbol !== playerSymbolToCheck || firstSymbol === '') continue;
 
-// --- Hissə 3 Sonu ---
-// public/OYUNLAR/tictactoe/game/oda_ici.js
-// Version: v2.2 - Socket.IO + AI URL + Debug Logs - Hissə 4/5
+            let allSame = true;
+            // Kombinasiyadakı bütün xanaların eyni simvol olduğunu yoxla
+            for (let j = 1; j < condition.length; j++) {
+                if (board[condition[j]] !== firstSymbol) {
+                    allSame = false;
+                    break;
+                }
+            }
+            if (allSame) {
+                winningCombination = condition; // Qazanan kombinasiyanı saxla
+                return true; // Qazanan tapıldı
+            }
+        }
+        return false; // Qazanan tapılmadı
+    };
 
-// ---- DOMContentLoaded içində davam edirik (Hissə 3-dən) ----
+    function generateWinConditions(size) {
+        // Verilmiş lövhə ölçüsü üçün bütün mümkün qazanma kombinasiyalarını yaradır
+        // 3x3 və 4x4 üçün 3 yan-yana, 5x5 və 6x6 üçün 4 yan-yana qaydası
+        const conditions = [];
+        const winLength = (size === 3 || size === 4) ? 3 : 4;
+
+        for (let r = 0; r < size; r++) { // Sətirlər üzrə
+            for (let c = 0; c < size; c++) { // Sütunlar üzrə
+                // Üfüqi
+                if (c <= size - winLength) {
+                    const rowCondition = [];
+                    for (let k = 0; k < winLength; k++) rowCondition.push(r * size + (c + k));
+                    conditions.push(rowCondition);
+                }
+                // Şaquli
+                if (r <= size - winLength) {
+                    const colCondition = [];
+                    for (let k = 0; k < winLength; k++) colCondition.push((r + k) * size + c);
+                    conditions.push(colCondition);
+                }
+                // Diaqonal (Sol yuxarıdan sağ aşağı)
+                if (r <= size - winLength && c <= size - winLength) {
+                    const diag1Condition = [];
+                    for (let k = 0; k < winLength; k++) diag1Condition.push((r + k) * size + (c + k));
+                    conditions.push(diag1Condition);
+                }
+                // Diaqonal (Sağ yuxarıdan sol aşağı)
+                if (r <= size - winLength && c >= winLength - 1) {
+                    const diag2Condition = [];
+                    for (let k = 0; k < winLength; k++) diag2Condition.push((r + k) * size + (c - k));
+                    conditions.push(diag2Condition);
+                }
+            }
+        }
+        // Təkrar kombinasiyaları aradan qaldırmaq üçün (ehtimal azdır, amma ehtiyat üçün)
+        const uniqueConditions = conditions.map(cond => JSON.stringify(cond.sort((a,b)=>a-b)));
+        return [...new Set(uniqueConditions)].map(str => JSON.parse(str));
+    };
+
+    function checkDraw() {
+        // Bərabərlik vəziyyətini yoxlayır (lövhədə boş xana qalmayıbsa)
+        return !board.includes('');
+    };
+
+    function highlightWinningCells() {
+        // Qazanan kombinasiyadakı hüceyrələri vizual olaraq işıqlandırır
+        winningCombination.forEach(index => {
+            if(cells[index]) cells[index].classList.add('winning');
+        });
+    };
+
 
     // ----- Oyun Sonu -----
     function endGame(isDraw, winnerMark) {
         // Oyun bitdikdə çağırılır, statusu yeniləyir, effektləri işə salır
         console.log(`[endGame] Oyun bitdi. Bərabərlik: ${isDraw}, Qazanan İşarə: ${winnerMark}`);
         isGameOver = true; // Oyunun bitdiyini işarələ
-        boardElement.style.pointerEvents = 'none'; // Lövhəni deaktiv et
+        if(boardElement) boardElement.style.pointerEvents = 'none'; // Lövhəni deaktiv et
         if (restartGameBtn) restartGameBtn.disabled = false; // Yenidən başlat düyməsini aktiv et
 
-        const winnerName = winnerMark === player1Symbol ? currentPlayerName : opponentPlayerName; // Qalibin adını tap
+        const winnerName = winnerMark === player1Symbol ? currentPlayerName : (winnerMark ? opponentPlayerName : null);
 
         if (isDraw) {
-            // Bərabərlik halı
             if (gameStatusDisplay) { gameStatusDisplay.textContent = "Oyun Bərabərə!"; gameStatusDisplay.classList.add('draw'); }
             if (turnIndicator) turnIndicator.textContent = "Bərabərə";
-        } else {
-            // Qalib varsa
+        } else if (winnerMark && winnerName) { // Qalib varsa
             if (gameStatusDisplay) { gameStatusDisplay.textContent = `${escapeHtml(winnerName)} Qazandı!`; gameStatusDisplay.classList.add('win'); }
             if (turnIndicator) turnIndicator.textContent = "Bitdi";
-             // Qalib üçün qeyd etmə effektləri
-             if(winnerMark) triggerShatterEffect(winnerMark);
+            triggerShatterEffect(winnerMark); // Qalib üçün effekt
+        } else {
+             // Qalib yoxdursa və bərabərlik də deyilsə (məs. rəqib ayrıldı)
+             if (gameStatusDisplay) gameStatusDisplay.textContent = "Oyun Bitdi";
+             if (turnIndicator) turnIndicator.textContent = "Bitdi";
         }
 
         // Aktiv oyunçu stilini hər iki tərəfdən qaldır
         playerXInfo?.classList.remove('active-player');
         playerOInfo?.classList.remove('active-player');
-        updatePlayerInfo(); // Oyunçu məlumatlarını son vəziyyətə görə yenilə
-    } // endGame sonu
-
+        // updatePlayerInfo(); // Oyunçu məlumatlarını son vəziyyətə görə yenilə (simvollar qalsın)
+    }
 
     // ----- Effektlər -----
     function triggerShatterEffect(winnerMark) {
         // Qalib üçün parçalanma mətn effektini işə salır
          if (!fireworksOverlay || !shatteringTextContainer || !winnerMark) return;
-         clearShatteringText(); // Köhnə mətni təmizlə
-         // Qalibə uyğun mətni yarat
+         clearShatteringText();
          const text = winnerMark === player1Symbol ? "Siz Qazandınız!" : `${escapeHtml(opponentPlayerName)} Qazandı!`;
          const chars = text.split('');
-         // Hər hərfi ayrı span-a yerləşdir
          chars.forEach((char, index) => { const span = document.createElement('span'); span.textContent = char === ' ' ? '\u00A0' : char; span.classList.add('shatter-char'); span.style.setProperty('--char-index', index); shatteringTextContainer.appendChild(span); });
-         fireworksOverlay.classList.add('visible'); // Fişəng overlayını göstər
-         shatteringTextContainer.style.opacity = '1'; // Mətni görünən et
-         // Qısa gecikmədən sonra animasiyanı başlat
+         fireworksOverlay.classList.add('visible');
+         shatteringTextContainer.style.opacity = '1';
          setTimeout(() => {
              const spans = shatteringTextContainer.querySelectorAll('.shatter-char');
-             // CSS dəyişənlərindən animasiya parametrlərini al
-             const duration = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--shatter-duration').replace('s',''))*1000||3000;
-             const distance = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--shatter-distance').replace('px',''))||170;
-             // Hər hərf üçün təsadüfi hərəkət parametrləri təyin et
+             let duration = 3000, distance = 170; // Default values
+             try {
+                duration = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--shatter-duration').replace('s',''))*1000||3000;
+                distance = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--shatter-distance').replace('px',''))||170;
+             } catch(e){ console.warn("Shatter CSS dəyişənləri alına bilmədi."); }
+
              spans.forEach((span, i) => { const angle = Math.random()*360; const randDist = Math.random()*distance; const tx = Math.cos(angle*Math.PI/180)*randDist; const ty = Math.sin(angle*Math.PI/180)*randDist; const tz = (Math.random()-0.5)*distance*0.5; const rot = (Math.random()-0.5)*720; const delay = Math.random()*0.1; span.style.setProperty('--tx',`${tx}px`); span.style.setProperty('--ty',`${ty}px`); span.style.setProperty('--tz',`${tz}px`); span.style.setProperty('--rot',`${rot}deg`); span.style.animationDelay=`${delay}s`; span.classList.add('animate'); });
-             // Animasiya bitdikdən sonra effektləri gizlət
              setTimeout(hideFireworks, duration + 500);
          }, 100);
      }
-    function hideFireworks() {
-        // Fişəng və parçalanma effektlərini gizlədir
-        if (fireworksOverlay) fireworksOverlay.classList.remove('visible');
-        if (shatteringTextContainer) shatteringTextContainer.style.opacity = '0';
-        setTimeout(clearShatteringText, 500); // Mətnin tamamilə itməsini gözləyib təmizlə
-    }
-    function clearShatteringText() {
-        // Parçalanma mətni konteynerini təmizləyir
-        if (shatteringTextContainer) shatteringTextContainer.innerHTML = '';
-    }
+    function hideFireworks() { if (fireworksOverlay) fireworksOverlay.classList.remove('visible'); if (shatteringTextContainer) shatteringTextContainer.style.opacity = '0'; setTimeout(clearShatteringText, 500); }
+    function clearShatteringText() { if (shatteringTextContainer) shatteringTextContainer.innerHTML = ''; }
 
 
-    // ----- Otaq Əməliyyatları (Placeholder - Server tərəfi lazımdır) -----
+    // ----- Otaq Əməliyyatları -----
     function openEditModal() {
-        // Otaq ayarları modalını açır (əgər icazə varsa)
         if(isPlayingAgainstAI) { alert("AI oyununda otaq ayarları dəyişdirilə bilməz."); return; }
         if(!isCurrentUserCreator) { alert("Yalnız otağı yaradan parametrləri dəyişə bilər."); return; }
         console.warn("Otaq ayarları funksionallığı hələ tam deyil (serverlə əlaqə yoxdur).");
-        // Modalın içini doldur (əvvəlki kod kimi)
         if (!editRoomModal) return;
         const nameInput = editRoomModal.querySelector('#edit-room-name');
         const passwordCheck = editRoomModal.querySelector('#edit-room-password-check');
@@ -795,7 +987,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         showModal(editRoomModal);
     }
     function saveRoomChanges() {
-        // Otaq ayarlarını yadda saxlayır (hələlik yalnız lokal)
         console.warn("Otaq ayarlarını yadda saxlama funksionallığı hələ tam deyil (serverə göndərilmir).");
         if (!editRoomModal) return;
         const nameInput = editRoomModal.querySelector('#edit-room-name');
@@ -819,15 +1010,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (needsRestart) { console.log("Ölçü dəyişdiyi üçün oyun yenidən başladılır..."); handleRestartGame(true); /* Serverə də bildirmək lazımdır! */ }
     }
     function deleteRoom() {
-        // Otağı silir (hələlik yalnız lokal simulyasiya)
         console.warn("Otaq silmə funksionallığı hələ tam deyil (serverə göndərilmir).");
-        if(isPlayingAgainstAI || !isCurrentUserCreator) return; // Şərtlər
+        if(isPlayingAgainstAI || !isCurrentUserCreator) return;
         if (confirm(`'${escapeHtml(currentRoomData.name)}' otağını silmək istədiyinizə əminsiniz?`)) {
             const msgElement = editRoomModal?.querySelector('#edit-room-message');
             showMsg(msgElement, 'Otaq silinir...', 'info', 0);
-            // TODO: Serverə 'delete_room' emit et
-             if (socket && socket.connected) socket.emit('delete_room', { roomId: currentRoomId });
-            // Lobiyə yönləndir (serverdən təsdiq gözləmədən)
+            if (socket && socket.connected) socket.emit('delete_room', { roomId: currentRoomId });
             setTimeout(() => {
                 alert("Otaq silindi. Lobiyə qayıdırsınız.");
                 window.location.href = '../lobby/test_odalar.html';
@@ -835,14 +1023,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     function handleKickOpponent() {
-        // Rəqibi qovur (hələlik yalnız lokal simulyasiya)
-        if (isPlayingAgainstAI || !isCurrentUserCreator || !isOpponentPresent) return; // Şərtlər
+        if (isPlayingAgainstAI || !isCurrentUserCreator || !isOpponentPresent) return;
         if (confirm(`${escapeHtml(opponentPlayerName)}-i otaqdan çıxarmaq istədiyinizə əminsiniz?`)) {
-             console.warn("Kick funksionallığı hələ tam deyil (serverə göndərilmir).");
-             // TODO: Serverə 'kick_opponent' emit et
+             console.warn("Kick funksionallığı hələ tam deyil.");
              if (socket && socket.connected) socket.emit('kick_opponent', { roomId: currentRoomId });
-
-             // Lokal olaraq rəqibin ayrılmasını simulyasiya edək
+             // Serverdən təsdiq gəlməsini gözləmək daha yaxşıdır, amma lokalda dərhal UI yeniləyək
               opponentPlayerName = 'Rəqib Gözlənilir...'; isOpponentPresent = false; isPlayingAgainstAI = false; aiPlayerSymbol = '';
               if (playerONameDisplay) playerONameDisplay.textContent = opponentPlayerName; if (playerOSymbolDisplay) playerOSymbolDisplay.textContent = '?'; if (playerOInfo) playerOInfo.className = 'player-info'; playerOInfo?.classList.remove('active-player');
               isGameOver = true; resetGameStateVars(); resetBoardAndStatus();
@@ -850,354 +1035,190 @@ document.addEventListener('DOMContentLoaded', async () => {
               updateHeaderButtonsVisibility(); hideModal(diceRollModal); hideModal(symbolSelectModal);
         }
     }
+
+    // --- YENİ VƏ YA DƏYİŞDİRİLMİŞ handleCallSnow funksiyası ---
     function handleCallSnow() {
-        // Bu funksiya oyun içində mənasızdır, lobidən gəlmək daha məntiqlidir.
-        console.log("handleCallSnow: Oyun içində işləmir.");
+        console.log("[handleCallSnow] Çağırıldı.");
+        if (isOpponentPresent || isPlayingAgainstAI) { console.warn("[handleCallSnow] Artıq rəqib var və ya AI ilə oynanılır. Çağırış ləğv edildi."); return; }
+        if (!isCurrentUserCreator) { alert("Yalnız otaq yaradan SNOW-u çağıra bilər."); return; }
+        console.log("[handleCallSnow] SNOW oyuna əlavə edilir...");
+        isPlayingAgainstAI = true; isOpponentPresent = true; opponentPlayerName = "SNOW"; aiPlayerSymbol = '';
+        updatePlayerInfo(); updateHeaderButtonsVisibility();
+        if (callSnowBtn) callSnowBtn.disabled = true;
+        console.log("[handleCallSnow] Simvol seçimi başladılır...");
+        // Zər qalibini təyin et (insan başlasın simvolu seçsin)
+        diceWinner = currentPlayerName;
+        initSymbolSelection(); // Simvol seçim modalını aç/idare et
+        isGameOver = false;
+        if (restartGameBtn) restartGameBtn.disabled = false;
+        if (gameStatusDisplay) { gameStatusDisplay.textContent = "SNOW ilə oyun başlayır. Simvol seçilir..."; gameStatusDisplay.className = 'game-status'; }
+        if (turnIndicator) turnIndicator.textContent = 'Simvol Seçilir...';
+        console.log("[handleCallSnow] Proses tamamlandı.");
     }
 
 
     // ----- Yeniden Başlatma -----
     function handleRestartGame(accepted = false) {
-        // Oyunu yenidən başlatma məntiqi
-        // Oyun bitməyibsə və ya multiplayerdə rəqib yoxdursa, heç nə etmə
-        if (!isGameOver || (!isOpponentPresent && !isPlayingAgainstAI)) {
-             console.log(`Yenidən başlatmaq üçün şərtlər ödənmir (GameOver=${isGameOver}, OpponentPresent=${isOpponentPresent}, IsAI=${isPlayingAgainstAI}).`);
-             return;
-        }
+        if (!isGameOver || (!isOpponentPresent && !isPlayingAgainstAI)) { console.log(`Yenidən başlatmaq üçün şərtlər ödənmir.`); return; }
         console.log(`handleRestartGame çağırıldı. Qəbul edilib: ${accepted}`);
-
-        if (isPlayingAgainstAI) {
-             // AI oyununda dərhal lokal restart et
-             console.log("AI oyunu yenidən başladılır...");
-             performLocalRestart();
-        } else {
-             // Multiplayer oyunu
-             if (accepted) {
-                  // Əgər qəbul edilibsə (ya biz qəbul etdik, ya rəqibdən gəldi)
-                  console.log("Multiplayer oyunu yenidən başladılır...");
-                  performLocalRestart(); // Lokal restart et
-                  // Serverə və ya rəqibə təkrar bildirməyə ehtiyac yoxdur,
-                  // çünki 'accept_restart' hər iki tərəfdə bunu etməlidir.
-             } else {
-                  // Əgər restart düyməsinə basılıbsa (təklif göndərilir)
+        if (isPlayingAgainstAI) { console.log("AI oyunu yenidən başladılır..."); performLocalRestart(); }
+        else { // Multiplayer
+             if (accepted) { console.log("Multiplayer oyunu yenidən başladılır..."); performLocalRestart(); }
+             else { // Təklif göndər
                   if (socket && socket.connected) {
                        console.log("Yenidən başlatma təklifi serverə göndərilir ('request_restart')...");
-                       socket.emit('request_restart'); // Serverə təklifi göndər
+                       socket.emit('request_restart');
                        if(gameStatusDisplay) gameStatusDisplay.textContent = "Yenidən başlatma təklifi göndərildi. Rəqib gözlənilir...";
-                       if(restartGameBtn) restartGameBtn.disabled = true; // Cavab gələnə qədər deaktiv et
-                       // Cavab üçün timeout
-                       setTimeout(() => {
-                            if(restartGameBtn && restartGameBtn.disabled && isGameOver) { // Hələ də deaktivdirsə
-                                 restartGameBtn.disabled = false;
-                                 if(gameStatusDisplay && gameStatusDisplay.textContent.includes("gözlənilir")) {
-                                      gameStatusDisplay.textContent = "Yenidən başlatma təklifinə cavab gəlmədi.";
-                                 }
-                            }
-                       }, 15000); // 15 saniyə
-                  } else {
-                       alert("Serverlə bağlantı yoxdur. Təklif göndərilə bilmədi.");
-                  }
+                       if(restartGameBtn) restartGameBtn.disabled = true;
+                       // Cavab üçün timeout (optional)
+                       setTimeout(() => { if(restartGameBtn && restartGameBtn.disabled && isGameOver) { restartGameBtn.disabled = false; if(gameStatusDisplay && gameStatusDisplay.textContent.includes("gözlənilir")) { gameStatusDisplay.textContent = "Təklifə cavab gəlmədi."; } } }, 15000);
+                  } else { alert("Serverlə bağlantı yoxdur."); }
              }
         }
-    } // handleRestartGame sonu
-
+    }
     function performLocalRestart() {
-        // Əsl restart əməliyyatlarını edən funksiya
          console.log("performLocalRestart: Oyun vəziyyəti və lövhə sıfırlanır...");
-         hideFireworks(); // Effektləri gizlət
-         resetGameStateVars(); // Oyun dəyişənlərini sıfırla
-         resetBoardAndStatus(); // Lövhəni və UI-ni sıfırla
-
+         hideFireworks(); resetGameStateVars(); resetBoardAndStatus();
          if (isOpponentPresent) { // Rəqib (və ya AI) hələ də 'varsa'
               if (gameStatusDisplay) gameStatusDisplay.textContent = "Oyun yenidən başlayır. Zər atılır...";
-              setupDiceModalForRollOff(); // Zər modalını hazırla
-              showModal(diceRollModal); // Modalı göstər
-              initDice(); // Zəri sıfırla
-         } else {
-              // Bu hal normalda yalnız rəqib ayrıldıqdan sonra baş verə bilər
-              console.warn("performLocalRestart: Rəqib olmadan restart edilir?");
-              if (gameStatusDisplay) gameStatusDisplay.textContent = "Rəqib gözlənilir...";
-              hideModal(diceRollModal); hideModal(symbolSelectModal); updateHeaderButtonsVisibility();
-         }
-          if (restartGameBtn) restartGameBtn.disabled = true; // Restart düyməsi oyun başlayana qədər deaktiv olur
+              setupDiceModalForRollOff(); showModal(diceRollModal); initDice();
+         } else { console.warn("performLocalRestart: Rəqib olmadan restart edilir?"); if (gameStatusDisplay) gameStatusDisplay.textContent = "Rəqib gözlənilir..."; hideModal(diceRollModal); hideModal(symbolSelectModal); updateHeaderButtonsVisibility(); }
+         if (restartGameBtn) restartGameBtn.disabled = true;
     }
 
-// --- Hissə 4 Sonu ---
-// public/OYUNLAR/tictactoe/game/oda_ici.js
-// Version: v2.2 - Socket.IO + AI URL + Debug Logs - Hissə 5/5 (Opponent Joined Fix)
-
-// ---- DOMContentLoaded içində davam edirik (Hissə 4-dən) ----
 
     // ===== SOCKET.IO BAĞLANTISI və OYUN İÇİ HADİSƏLƏR =====
-    function setupGameSocketConnection(roomId) {
-        // Socket.IO bağlantısını qurur (əgər AI oyunu deyilsə)
-        if (socket && socket.connected) socket.disconnect(); // Köhnəni bağla
-        if (isPlayingAgainstAI || !roomId) {
-            console.log(`[SocketSetup] AI oyunu (${isPlayingAgainstAI}) və ya RoomID (${roomId}) olmadığı üçün socket qurulmur.`);
-            return;
-        }
-        console.log(`[SocketSetup] ${roomId} otağı üçün bağlantı qurulur...`);
+    function setupGameSocketConnection(roomIdToJoin) {
+        if (socket && socket.connected) socket.disconnect();
+        if (isPlayingAgainstAI || !roomIdToJoin) { console.log(`[SocketSetup] AI oyunu (${isPlayingAgainstAI}) və ya RoomID (${roomIdToJoin}) olmadığı üçün socket qurulmur.`); return; }
+        console.log(`[SocketSetup] ${roomIdToJoin} otağı üçün bağlantı qurulur...`);
         showLoadingOverlay('Serverə qoşulunur...');
-
-        socket = io({ reconnectionAttempts: 3 }); // Qoşulma cəhdlərini məhdudlaşdır
+        socket = io({ reconnectionAttempts: 3 });
 
         // --- Əsas Bağlantı Hadisələri ---
         socket.on('connect', () => {
-            console.log(`[Socket] Oyun serverinə qoşuldu! Socket ID: ${socket.id}, Otaq ID: ${roomId}`);
+            console.log(`[Socket] Oyun serverinə qoşuldu! Socket ID: ${socket.id}, Otaq ID: ${roomIdToJoin}`);
             hideLoadingOverlay();
-            // Serverə bu otaqda olduğumuzu bildirək (Join prosesi üçün vacib ola bilər)
-            // Bu hadisə serverin bizə 'room_info' göndərməsini trigger etməlidir
-            socket.emit('player_ready_in_room', { roomId: roomId });
+            socket.emit('player_ready_in_room', { roomId: roomIdToJoin }); // Serverə bu otaqda olduğumuzu bildir
             console.log("[Socket] 'player_ready_in_room' hadisəsi göndərildi.");
             if (gameStatusDisplay && !isOpponentPresent) { gameStatusDisplay.textContent = 'Rəqib gözlənilir...'; }
         });
-        socket.on('disconnect', (reason) => {
-            console.warn('[Socket] Serverlə bağlantı kəsildi:', reason);
-            if (gameStatusDisplay) gameStatusDisplay.textContent = 'Bağlantı kəsildi!';
-            if (turnIndicator) turnIndicator.textContent = "Offline";
-            isGameOver = true;
-            isOpponentPresent = false;
-            opponentPlayerName = 'Rəqib (Offline)';
-            updatePlayerInfo();
-            boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none';
-        });
-        socket.on('connect_error', (error) => {
-            console.error('[Socket] Qoşulma xətası:', error.message);
-            if (gameStatusDisplay) gameStatusDisplay.textContent = 'Qoşulma xətası!';
-            if (turnIndicator) turnIndicator.textContent = "Xəta";
-            isGameOver = true;
-            boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none';
-             alert(`Serverə qoşulmaq mümkün olmadı: ${error.message}`);
-        });
-        socket.on('room_deleted_kick', (data) => {
-             console.warn('Otaq silindiyi üçün çıxarıldınız:', data?.message);
-             alert(data?.message || 'Otaq yaradan tərəfindən silindi.');
-             window.location.href = '../lobby/test_odalar.html'; // Lobiyə yönləndir
-        });
+        socket.on('disconnect', (reason) => { console.warn('[Socket] Serverlə bağlantı kəsildi:', reason); if (gameStatusDisplay) gameStatusDisplay.textContent = 'Bağlantı kəsildi!'; isGameOver = true; isOpponentPresent = false; opponentPlayerName = 'Rəqib (Offline)'; updatePlayerInfo(); boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none'; });
+        socket.on('connect_error', (error) => { console.error('[Socket] Qoşulma xətası:', error.message); if (gameStatusDisplay) gameStatusDisplay.textContent = 'Qoşulma xətası!'; isGameOver = true; boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none'; alert(`Serverə qoşulmaq mümkün olmadı: ${error.message}`); });
+        socket.on('room_deleted_kick', (data) => { console.warn('Otaq silindiyi üçün çıxarıldınız:', data?.message); alert(data?.message || 'Otaq yaradan tərəfindən silindi.'); window.location.href = '../lobby/test_odalar.html'; });
+        socket.on('force_redirect_lobby', (data) => { console.warn('Server lobiyə yönləndirmə tələb etdi:', data?.message); alert(data?.message || 'Otaq mövcud deyil və ya xəta baş verdi.'); window.location.href = '../lobby/test_odalar.html'; });
 
         // --- Oyunla Bağlı Hadisələr ---
-        setupGameEventListeners(socket); // Dinləyiciləri quraşdır
-
-    } // setupGameSocketConnection sonu
-
+        setupGameEventListeners(socket);
+    }
 
     function setupGameEventListeners(socketInstance) {
-        // Oyunla bağlı Socket.IO hadisələrini dinləyir
         console.log("[SocketListeners] Oyun hadisə dinləyiciləri quraşdırılır...");
-
-        // RƏQİBİN QOŞULMASI (Try-Catch ilə)
         socketInstance.on('opponent_joined', (data) => {
-            // <<< DƏYİŞİKLİK BAŞLANĞICI: Konsol loqu və Try-Catch >>>
-            console.log(`[Socket Event] >>> opponent_joined ALINDI:`, data); // Hadisənin alındığını logla
-            try { // Xəta tutma bloku
-                if (isPlayingAgainstAI) {
-                    console.log("[opponent_joined] AI oyununda rəqib qoşulması ignor edilir.");
-                    return;
-                }
-                opponentPlayerName = data?.username || 'Rəqib (?)';
-                isOpponentPresent = true;
-                console.log(`[opponent_joined] Rəqib təyin edildi: ${opponentPlayerName}`);
-
-                if (playerONameDisplay) playerONameDisplay.textContent = escapeHtml(opponentPlayerName);
-                else console.error("opponent_joined: playerONameDisplay null!");
-
-                if (gameStatusDisplay) gameStatusDisplay.textContent = `${opponentPlayerName} qoşuldu. Zər atılır...`;
-                else console.error("opponent_joined: gameStatusDisplay null!");
-
-                // Zər modalını hazırla və göstər
-                console.log("[opponent_joined] Zər modalı hazırlanır...");
-                setupDiceModalForRollOff();
-                console.log("[opponent_joined] Zər modalı göstərilir...");
-                showModal(diceRollModal);
-                console.log("[opponent_joined] Zər başladılır (initDice)...");
-                initDice(); // Zəri sıfırla və klikləməni aktiv et
-
-                console.log("[opponent_joined] UI yenilənir...");
-                updatePlayerInfo(); // UI yenilə
-                updateHeaderButtonsVisibility(); // Düymələri yenilə
-                console.log("[opponent_joined] Handler bitdi.");
-
-            } catch (error) {
-                // Əgər xəta baş verərsə, onu tutub konsola yazdırırıq
-                console.error("<<<<< opponent_joined içində KRİTİK XƏTA! Bağlantı kəsilə bilər! >>>>>", error);
-                if (gameStatusDisplay) gameStatusDisplay.textContent = "Rəqib qoşularkən xəta baş verdi!";
-            }
-            // <<< DƏYİŞİKLİK SONU >>>
+             console.log(`[Socket Event] >>> opponent_joined ALINDI:`, data);
+             try {
+                  if (isPlayingAgainstAI) {
+                       console.log("[opponent_joined] AI oyununda rəqib qoşulması ignor edilir (hələlik).");
+                       // TODO: AI ilə oynayarkən real rəqib qoşulma məntiqini burada idarə et
+                       // Məsələn, bildiriş göstər, seçim təklif et.
+                       return;
+                  }
+                  opponentPlayerName = data?.username || 'Rəqib (?)';
+                  isOpponentPresent = true;
+                  console.log(`[opponent_joined] Rəqib təyin edildi: ${opponentPlayerName}`);
+                  if (playerONameDisplay) playerONameDisplay.textContent = escapeHtml(opponentPlayerName);
+                  if (gameStatusDisplay) gameStatusDisplay.textContent = `${opponentPlayerName} qoşuldu. Zər atılır...`;
+                  setupDiceModalForRollOff(); showModal(diceRollModal); initDice();
+                  updatePlayerInfo(); updateHeaderButtonsVisibility();
+             } catch (error) { console.error("<<<<< opponent_joined içində KRİTİK XƏTA! >>>>>", error); if (gameStatusDisplay) gameStatusDisplay.textContent = "Rəqib qoşularkən xəta!"; }
         });
-
-        // RƏQİBİN AYRILMASI
         socketInstance.on('opponent_left_game', (data) => {
             console.log(`[Socket Event] opponent_left_game alındı:`, data);
-            if (isPlayingAgainstAI) return;
+            if (isPlayingAgainstAI) return; // Əgər AI ilə oynayırdıqsa, bu hadisə mənasızdır
             const opponentWhoLeft = data?.username || 'Rəqib';
             if (gameStatusDisplay) gameStatusDisplay.textContent = `${opponentWhoLeft} otaqdan ayrıldı.`;
             if (turnIndicator) turnIndicator.textContent = "Gözlənilir";
-            isGameOver = true;
-            isOpponentPresent = false;
-            opponentPlayerName = 'Rəqib Gözlənilir...';
-            resetGameStateVars();
-            resetBoardAndStatus();
-            hideModal(diceRollModal);
-            hideModal(symbolSelectModal);
+            isGameOver = true; isOpponentPresent = false; opponentPlayerName = 'Rəqib Gözlənilir...';
+            resetGameStateVars(); resetBoardAndStatus();
+            hideModal(diceRollModal); hideModal(symbolSelectModal);
             if (restartGameBtn) restartGameBtn.disabled = true;
-            updateHeaderButtonsVisibility();
+            updateHeaderButtonsVisibility(); // Call SNOW düyməsi görünə bilər
         });
-
-        // RƏQİBİN ZƏR NƏTİCƏSİ
-        socketInstance.on('opponent_dice_result', (data) => {
-            // console.log(`[Socket Event] opponent_dice_result alındı:`, data); // Daha az log üçün kommentə alınır
-            if (isPlayingAgainstAI || !data || typeof data.roll !== 'number') return;
-            const processResult = () => { player2Roll = data.roll; if (opponentRollResultDisplay) opponentRollResultDisplay.textContent = player2Roll; if (player1Roll !== null) { handleRollOffResults(player1Roll, player2Roll); } };
-            if (isDiceRolling) { setTimeout(processResult, 500); } else { processResult(); }
-        });
-
-        // RƏQİBİN SİMVOL SEÇİMİ
-        socketInstance.on('opponent_symbol_chosen', (data) => {
-            console.log(`[Socket Event] opponent_symbol_chosen alındı:`, data);
-            if (isPlayingAgainstAI || !data || (data.symbol !== 'X' && data.symbol !== 'O')) return;
-            if (symbolSelectModal && symbolSelectModal.style.display === 'block') { startGameProcedure(data.symbol); } else { console.warn("opponent_symbol_chosen alındı, amma modal bağlı idi?"); }
-        });
-
-        // RƏQİBİN HƏRƏKƏTİ
-        socketInstance.on('opponent_moved', (data) => {
-            // console.log(`[Socket Event] opponent_moved alındı:`, data); // Daha az log
-            if (isPlayingAgainstAI || !data || typeof data.index !== 'number' || !data.mark || isGameOver) return;
-            placeMark(data.index, data.mark);
-            if (!isGameOver) { switchPlayer(); updateTurnIndicator(); boardElement.style.pointerEvents = 'auto'; if (gameStatusDisplay) gameStatusDisplay.textContent = `Sıra: ${currentPlayerName}`; }
-            else { boardElement.style.pointerEvents = 'none'; }
-        });
-
-        // YENİDƏN BAŞLATMA TƏKLİFİ ALINDI
-        socketInstance.on('restart_requested', (data) => {
-             console.log(`[Socket Event] restart_requested alındı: ${data?.username}`);
-             if (isGameOver && isOpponentPresent && !isPlayingAgainstAI) {
-                  const requester = data?.username || 'Rəqib';
-                  if (confirm(`${requester} oyunu yenidən başlatmağı təklif edir. Qəbul edirsiniz?`)) {
-                       console.log("Yenidən başlatma təklifi qəbul edildi.");
-                       socketInstance.emit('accept_restart');
-                       handleRestartGame(true);
-                  } else { console.log("Yenidən başlatma təklifi rədd edildi."); }
-             } else { console.warn("restart_requested alındı, amma şərtlər ödənmir."); }
-        });
-
-        // YENİDƏN BAŞLATMA QƏBUL EDİLDİ
-        socketInstance.on('restart_accepted', (data) => {
-            console.log(`[Socket Event] restart_accepted alındı: ${data?.username}`);
-             if (isGameOver && isOpponentPresent && !isPlayingAgainstAI) {
-                  const accepter = data?.username || 'Rəqib';
-                  if (gameStatusDisplay) gameStatusDisplay.textContent = `${accepter} yenidən başlatmağı qəbul etdi. Zər atılır...`;
-                  handleRestartGame(true);
-             } else { console.warn("restart_accepted alındı, amma şərtlər ödənmir."); }
-        });
-
-         // Server tərəfindən otaq məlumatlarının alınması
-         socketInstance.on('room_info', (roomInfo) => {
-              console.log("[Socket Event] room_info alındı:", roomInfo);
-              if(!roomInfo) { console.warn("Boş room_info alındı."); return; }
-
-              // Yaradanı təyin et
-              if(roomInfo.creatorUsername) {
-                   currentRoomData.creatorUsername = roomInfo.creatorUsername;
-                   if(loggedInUser && loggedInUser.nickname) {
-                        isCurrentUserCreator = (loggedInUser.nickname === roomInfo.creatorUsername);
-                        console.log(`Otaq yaradanı: ${roomInfo.creatorUsername}. Bu client yaradıcıdır: ${isCurrentUserCreator}`);
-                   } else {
-                        console.warn("room_info: loggedInUser tapılmadı, yaradıcı statusu təyin edilə bilmədi.");
-                        isCurrentUserCreator = false;
-                   }
-              }
-              // Şifrə statusunu yenilə
-              if(typeof roomInfo.hasPassword === 'boolean'){
-                   currentRoomData.hasPassword = roomInfo.hasPassword;
-              }
-              // Otaq adını yenilə
-              if(roomInfo.name && roomNameDisplay) {
-                   roomNameDisplay.textContent = `Otaq: ${escapeHtml(roomInfo.name)}`;
-                   currentRoomData.name = roomInfo.name;
-              }
-              // Rəqib adını yenilə (əgər varsa və hələ təyin edilməyibsə VƏ BU İSTİFADƏÇİ DEYİLSƏ)
-               if(roomInfo.opponentUsername && !isOpponentPresent && loggedInUser && roomInfo.opponentUsername !== loggedInUser.nickname) {
-                   console.log(`room_info-dan rəqib adı təyin edilir: ${roomInfo.opponentUsername}`);
-                   opponentPlayerName = roomInfo.opponentUsername;
-                   isOpponentPresent = true;
-                   if(playerONameDisplay) playerONameDisplay.textContent = escapeHtml(opponentPlayerName);
-                   // Oyun statusunu yenilə və zər mərhələsinə keç
-                   if (gameStatusDisplay && gameStatusDisplay.textContent.includes("gözlənilir")) {
-                        gameStatusDisplay.textContent = `${opponentPlayerName} artıq otaqdadır. Zər atılır...`;
-                        setupDiceModalForRollOff();
-                        showModal(diceRollModal);
-                        initDice();
-                   }
+        socketInstance.on('opponent_dice_result', (data) => { if (isPlayingAgainstAI || !data || typeof data.roll !== 'number') return; const processResult = () => { player2Roll = data.roll; if (opponentRollResultDisplay) opponentRollResultDisplay.textContent = player2Roll; if (player1Roll !== null) { handleRollOffResults(player1Roll, player2Roll); } }; if (isDiceRolling) { setTimeout(processResult, 500); } else { processResult(); } });
+        socketInstance.on('opponent_symbol_chosen', (data) => { if (isPlayingAgainstAI || !data || (data.symbol !== 'X' && data.symbol !== 'O')) return; if (symbolSelectModal && symbolSelectModal.style.display === 'block') { startGameProcedure(data.symbol); } else { console.warn("opponent_symbol_chosen alındı, amma modal bağlı idi?"); } });
+        socketInstance.on('opponent_moved', (data) => { if (isPlayingAgainstAI || !data || typeof data.index !== 'number' || !data.mark || isGameOver) return; const moveMade = placeMark(data.index, data.mark); if (moveMade && !isGameOver) { switchPlayer(); updateTurnIndicator(); if(boardElement) boardElement.style.pointerEvents = 'auto'; if (gameStatusDisplay) gameStatusDisplay.textContent = `Sıra: ${currentPlayerName}`; } else if (moveMade && isGameOver) { if(boardElement) boardElement.style.pointerEvents = 'none'; updateTurnIndicator(); } });
+        socketInstance.on('restart_requested', (data) => { if (isGameOver && isOpponentPresent && !isPlayingAgainstAI) { const requester = data?.username || 'Rəqib'; if (confirm(`${requester} oyunu yenidən başlatmağı təklif edir. Qəbul edirsiniz?`)) { console.log("Təklif qəbul edildi."); socketInstance.emit('accept_restart'); handleRestartGame(true); } else { console.log("Təklif rədd edildi."); } } else { console.warn("restart_requested alındı, amma şərtlər ödənmir."); } });
+        socketInstance.on('restart_accepted', (data) => { if (isGameOver && isOpponentPresent && !isPlayingAgainstAI) { const accepter = data?.username || 'Rəqib'; if (gameStatusDisplay) gameStatusDisplay.textContent = `${accepter} yenidən başlatmağı qəbul etdi. Zər atılır...`; handleRestartGame(true); } else { console.warn("restart_accepted alındı, amma şərtlər ödənmir."); } });
+        socketInstance.on('room_info', (roomInfo) => {
+             console.log("[Socket Event] room_info alındı:", roomInfo);
+             if(!roomInfo) { console.warn("Boş room_info alındı."); return; }
+             if(roomInfo.creatorUsername) { currentRoomData.creatorUsername = roomInfo.creatorUsername; if(loggedInUser?.nickname) { isCurrentUserCreator = (loggedInUser.nickname === roomInfo.creatorUsername); } else { isCurrentUserCreator = false; } }
+             if(typeof roomInfo.hasPassword === 'boolean'){ currentRoomData.hasPassword = roomInfo.hasPassword; }
+             if(roomInfo.name && roomNameDisplay) { roomNameDisplay.textContent = `Otaq: ${escapeHtml(roomInfo.name)}`; currentRoomData.name = roomInfo.name; }
+             // Rəqib adını yenilə (əgər varsa VƏ BU İSTİFADƏÇİ DEYİLSƏ VƏ HƏLƏ TƏYİN EDİLMƏYİBSƏ)
+              if(roomInfo.opponentUsername && !isOpponentPresent && loggedInUser && roomInfo.opponentUsername !== loggedInUser.nickname) {
+                  console.log(`room_info-dan rəqib adı təyin edilir: ${roomInfo.opponentUsername}`);
+                  opponentPlayerName = roomInfo.opponentUsername; isOpponentPresent = true;
+                  if(playerONameDisplay) playerONameDisplay.textContent = escapeHtml(opponentPlayerName);
+                  if (gameStatusDisplay && gameStatusDisplay.textContent.includes("gözlənilir")) { gameStatusDisplay.textContent = `${opponentPlayerName} artıq otaqdadır. Zər atılır...`; setupDiceModalForRollOff(); showModal(diceRollModal); initDice(); }
               } else if (roomInfo.opponentUsername && isOpponentPresent && loggedInUser && roomInfo.opponentUsername !== loggedInUser.nickname && opponentPlayerName !== roomInfo.opponentUsername){
-                  // Əgər rəqib adı dəyişibsə (çox mümkün deyil, amma ehtiyat üçün)
-                  console.log(`room_info-dan rəqib adı yenilənir: ${roomInfo.opponentUsername}`);
-                   opponentPlayerName = roomInfo.opponentUsername;
-                   if(playerONameDisplay) playerONameDisplay.textContent = escapeHtml(opponentPlayerName);
+                 console.log(`room_info-dan rəqib adı yenilənir: ${roomInfo.opponentUsername}`); opponentPlayerName = roomInfo.opponentUsername; if(playerONameDisplay) playerONameDisplay.textContent = escapeHtml(opponentPlayerName);
               }
-
-              // Düymələrin görünüşünü yenilə
-              updateHeaderButtonsVisibility();
-         });
-
-    } // setupGameEventListeners sonu
+             updateHeaderButtonsVisibility(); // Yaradıcı statusuna görə düymələri yenilə
+        });
+    }
 
 
     // ===== OYUNU BAŞLATMAQ ÜÇÜN İLK ADDIMLAR =====
-    function initializeGame() {
-        // URL parametrlərini alır, autentifikasiyanı yoxlayır (artıq edilib), UI-ni qurur
+    async function initializeGame() {
         console.log("[initializeGame] Başladı.");
         showLoadingOverlay('Oyun interfeysi qurulur...');
-
         try {
             const params = getUrlParams();
             currentRoomId = params.roomId;
             const receivedRoomName = params.roomName;
             boardSize = params.size;
-            isPlayingAgainstAI = params.playWithAI;
+            const startWithAI = params.playWithAI; // Lobidən gələn AI parametri
 
-            if (!playerXNameDisplay) throw new Error("playerXNameDisplay elementi tapılmadı!");
+            if (!playerXNameDisplay || !playerONameDisplay || !roomNameDisplay) throw new Error("Əsas UI elementləri tapılmadı!");
             playerXNameDisplay.textContent = currentPlayerName; // Auth-dan gələn ad
+            roomNameDisplay.textContent = `Otaq: ${escapeHtml(receivedRoomName)}`;
 
-            if (isPlayingAgainstAI) {
-                // AI Oyunu
-                console.log("[initializeGame] AI Oyunu (SNOW) başladılır.");
+            // İlkin currentRoomData-nı dolduraq (serverdən gələni gözləyərkən)
+            currentRoomData = { id: currentRoomId, name: receivedRoomName, creatorUsername: '?', hasPassword: false, boardSize: boardSize, isAiRoom: startWithAI };
+
+            adjustStylesForBoardSize(boardSize); // Stilləri ayarla
+            createBoard(); // Lövhəni yarat
+            resetGameStateVars(); // Oyun dəyişənlərini sıfırla
+            resetBoardAndStatus(); // Lövhə UI-ni sıfırla
+
+            if (startWithAI) {
+                // Lobidən birbaşa AI oyunu olaraq başla
+                console.log("[initializeGame] AI Oyunu (SNOW) başladılır (lobidən).");
+                isPlayingAgainstAI = true;
                 opponentPlayerName = "SNOW";
                 isOpponentPresent = true;
-                isCurrentUserCreator = true;
-                currentRoomData = { id: currentRoomId || `ai_local_${Date.now()}`, name: receivedRoomName, creatorUsername: currentPlayerName, hasPassword: false, boardSize: boardSize, isAiRoom: true };
-                if (roomNameDisplay) roomNameDisplay.textContent = `Otaq: ${escapeHtml(currentRoomData.name)}`;
+                isCurrentUserCreator = true; // AI oyununda client həmişə "yaradan" kimidir
+                currentRoomData.creatorUsername = currentPlayerName; // Özümüzü yaradan kimi göstərək
                 if (playerONameDisplay) playerONameDisplay.textContent = opponentPlayerName;
-                updateHeaderButtonsVisibility();
-                adjustStylesForBoardSize(boardSize);
-                createBoard();
-                resetGameStateVars();
+                updateHeaderButtonsVisibility(); // Düymələri göstər/gizlə
                 if (gameStatusDisplay) gameStatusDisplay.textContent = 'SNOW ilə oyun başlayır. Zər atın!';
                 hideLoadingOverlay();
-                setupDiceModalForRollOff();
-                showModal(diceRollModal);
-                initDice();
+                setupDiceModalForRollOff(); showModal(diceRollModal); initDice();
             } else {
                 // Normal (Multiplayer) Oyun
                 console.log(`[initializeGame] Multiplayer oyunu başladılır. RoomID: ${currentRoomId}`);
                 if (!currentRoomId) throw new Error("Multiplayer oyunu üçün Otaq ID tapılmadı!");
+                isPlayingAgainstAI = false;
                 opponentPlayerName = "Rəqib Gözlənilir...";
                 isOpponentPresent = false;
-                isCurrentUserCreator = false;
-                currentRoomData = { id: currentRoomId, name: receivedRoomName, creatorUsername: '?', hasPassword: false, boardSize: boardSize, isAiRoom: false };
-                if (roomNameDisplay) roomNameDisplay.textContent = `Otaq: ${escapeHtml(currentRoomData.name)}`;
+                // isCurrentUserCreator serverdən gələn 'room_info' ilə təyin olunacaq
                 if (playerONameDisplay) playerONameDisplay.textContent = opponentPlayerName;
-                updateHeaderButtonsVisibility();
-                adjustStylesForBoardSize(boardSize);
-                createBoard();
-                resetGameStateVars();
+                updateHeaderButtonsVisibility(); // İlkin düymə vəziyyəti
                 if (gameStatusDisplay) gameStatusDisplay.textContent = 'Rəqib gözlənilir...';
-                boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none';
-                if (restartGameBtn) restartGameBtn.disabled = true;
-                setupGameSocketConnection(currentRoomId); // Socket bağlantısını qur
-                hideLoadingOverlay();
+                setupGameSocketConnection(currentRoomId); // Socket bağlantısını qur (bu hideLoadingOverlay çağıracaq)
             }
-            try { const diceSizeValue = getComputedStyle(document.documentElement).getPropertyValue('--dice-size').trim(); if (diceSizeValue) initialCenterZ = parseFloat(diceSizeValue.replace('px','')) / -2; } catch(e) { initialCenterZ = -55; }
-            updatePlayerInfo();
+            updatePlayerInfo(); // Son UI yeniləməsi
             console.log(`[initializeGame] Oyun interfeysi quruldu. AI=${isPlayingAgainstAI}`);
         } catch (initError) {
             console.error("[initializeGame] Ümumi xəta:", initError);
@@ -1205,48 +1226,53 @@ document.addEventListener('DOMContentLoaded', async () => {
             if(gameStatusDisplay) gameStatusDisplay.textContent = "Oyun yüklənərkən xəta baş verdi.";
             if(turnIndicator) turnIndicator.textContent = "Xəta";
         }
-    } // initializeGame sonu
+    }
 
 
     // ===== GİRİŞ YOXLAMASI və BAŞLANĞIC (IIFE ilə) =====
-    // Bu hissə kodun ən sonunda yerləşir və səhifə yüklənəndə işə düşür
     (async () => {
         try {
             console.log("Oda İçi: /check-auth sorğusu...");
             showLoadingOverlay('Sessiya yoxlanılır...');
-            const response = await fetch('/check-auth');
+            // check-auth sorğusu üçün credential göndərməyə ehtiyac yoxdur,
+            // çünki session cookie avtomatik gedir (əgər domainlər uyğundursa).
+            const response = await fetch('/check-auth'); // Credentials: 'include' olmadan
             const data = await response.json();
-            if (!response.ok || !data.loggedIn) {
-                window.location.href = '/ANA SEHIFE/login/login.html'; // Adjust path if needed
+
+            if (!response.ok || !data.loggedIn || !data.user) {
+                console.error(`[/check-auth] Xətası: Status=${response.status}, loggedIn=${data.loggedIn}`);
+                alert("Sessiya tapılmadı və ya etibarsızdır. Giriş səhifəsinə yönləndirilirsiniz.");
+                window.location.href = '/ANA SEHIFE/login/login.html';
                 return;
             }
             loggedInUser = data.user;
             currentPlayerName = loggedInUser.nickname; // İstifadəçi adını qlobal dəyişənə yaz
             console.log(`Oda İçi: Giriş edilib: ${loggedInUser.nickname}`);
 
-            initializeGame(); // Autentifikasiya uğurlu olduqdan sonra oyunu başlat
+            // Giriş uğurlu olduqdan sonra oyunu başlat
+            await initializeGame(); // initializeGame indi async deyil, amma await qala bilər
 
         } catch (error) {
             console.error("Oda İçi: Auth yoxlama xətası:", error);
             hideLoadingOverlay();
             alert("Sessiya yoxlanılarkən xəta baş verdi. Giriş səhifəsinə yönləndirilirsiniz.");
-            window.location.href = '/ANA SEHIFE/login/login.html'; // Adjust path if needed
+            window.location.href = '/ANA SEHIFE/login/login.html';
         }
-    })(); // Async IIFE (Immediately Invoked Function Expression) sonu
+    })(); // Async IIFE sonu
+
 
     // --- Əsas UI Hadisə Dinləyiciləri ---
-    // Bu listenerlar DOM hazır olduqdan sonra bir dəfə təyin edilir
     console.log("Əsas UI listenerları əlavə edilir...");
-    if (leaveRoomBtn) { leaveRoomBtn.addEventListener('click', () => { if (confirm("Otaqdan çıxmaq istədiyinizə əminsiniz?")) { if (!isPlayingAgainstAI && socket && socket.connected) { socket.emit('leave_room'); } window.location.href = '../lobby/test_odalar.html'; } }); console.log("--> leaveRoomBtn listener əlavə edildi."); } else { console.error("leaveRoomBtn null idi!"); }
-    if (restartGameBtn) { restartGameBtn.addEventListener('click', () => handleRestartGame(false)); console.log("--> restartGameBtn listener əlavə edildi."); } else { console.error("restartGameBtn null idi!"); }
-    if (editRoomBtn) { editRoomBtn.addEventListener('click', openEditModal); console.log("--> editRoomBtn listener əlavə edildi."); } else { console.error("editRoomBtn null idi!"); }
-    if (closeEditModalButton) { closeEditModalButton.addEventListener('click', () => hideModal(editRoomModal)); /*console.log("--> closeEditModalButton listener əlavə edildi.");*/ } else { /*console.warn("closeEditModalButton null idi (normal ola bilər).");*/ }
-    window.addEventListener('click', (event) => { if (event.target == editRoomModal) hideModal(editRoomModal); }); /*console.log("--> window click listener (modal bağlama) əlavə edildi.");*/
-    if (saveRoomChangesBtn) { saveRoomChangesBtn.addEventListener('click', saveRoomChanges); console.log("--> saveRoomChangesBtn listener əlavə edildi."); } else { console.error("saveRoomChangesBtn null idi!"); }
-    if (deleteRoomConfirmBtn) { deleteRoomConfirmBtn.addEventListener('click', deleteRoom); console.log("--> deleteRoomConfirmBtn listener əlavə edildi."); } else { console.error("deleteRoomConfirmBtn null idi!"); }
-    if (kickOpponentBtn) { kickOpponentBtn.addEventListener('click', () => handleKickOpponent(false)); console.log("--> kickOpponentBtn listener əlavə edildi."); } else { console.error("kickOpponentBtn null idi!"); }
-    if (callSnowBtn) { callSnowBtn.addEventListener('click', handleCallSnow); console.log("--> callSnowBtn listener əlavə edildi."); } else { console.error("callSnowBtn null idi!"); } // Artıq tapılmalıdır
-    if (diceCubeElement) { diceCubeElement.addEventListener('mousedown', handleMouseDown); diceCubeElement.addEventListener('touchstart', handleTouchStart, { passive: false }); console.log("--> diceCubeElement listenerları əlavə edildi."); } else { console.error("Zər kub elementi (diceCubeElement) tapılmadı!"); }
+    if (leaveRoomBtn) { leaveRoomBtn.addEventListener('click', () => { if (confirm("Otaqdan çıxmaq istədiyinizə əminsiniz?")) { if (!isPlayingAgainstAI && socket && socket.connected) { socket.emit('leave_room'); } window.location.href = '../lobby/test_odalar.html'; } }); } else { console.error("leaveRoomBtn null idi!"); }
+    if (restartGameBtn) { restartGameBtn.addEventListener('click', () => handleRestartGame(false)); } else { console.error("restartGameBtn null idi!"); }
+    if (editRoomBtn) { editRoomBtn.addEventListener('click', openEditModal); } else { console.error("editRoomBtn null idi!"); }
+    if (closeEditModalButton) { closeEditModalButton.addEventListener('click', () => hideModal(editRoomModal)); }
+    window.addEventListener('click', (event) => { if (event.target == editRoomModal) hideModal(editRoomModal); });
+    if (saveRoomChangesBtn) { saveRoomChangesBtn.addEventListener('click', saveRoomChanges); } else { console.error("saveRoomChangesBtn null idi!"); }
+    if (deleteRoomConfirmBtn) { deleteRoomConfirmBtn.addEventListener('click', deleteRoom); } else { console.error("deleteRoomConfirmBtn null idi!"); }
+    if (kickOpponentBtn) { kickOpponentBtn.addEventListener('click', handleKickOpponent); } else { console.error("kickOpponentBtn null idi!"); } // handleKickOpponent funksiyası düzəldilməlidir
+    if (callSnowBtn) { callSnowBtn.addEventListener('click', handleCallSnow); } else { console.error("callSnowBtn null idi!"); } // handleCallSnow funksiyası düzəldildi
+    if (diceCubeElement) { diceCubeElement.addEventListener('mousedown', handleMouseDown); diceCubeElement.addEventListener('touchstart', handleTouchStart, { passive: false }); } else { console.error("Zər kub elementi (diceCubeElement) tapılmadı!"); }
     console.log("Əsas UI listenerlarının əlavə edilməsi bitdi.");
 
-}); // DOMContentLoaded Sonu - BU ƏN SONDA OLMALIDIR
+}); // DOMContentLoaded Sonu - ƏN SONDA OLMALIDIR

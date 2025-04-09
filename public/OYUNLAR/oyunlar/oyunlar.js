@@ -70,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => { // async burdan silinir, s
         } catch (error) {
             console.error("Oyunlar JS: Auth yoxlama xətası:", error);
             alert("Sessiya yoxlanılarkən xəta baş verdi. Giriş səhifəsinə yönləndirilirsiniz.");
-            window.location.href = '../../ANA SEHIFE/login/login.html';
+            window.location.href = '/ANA SEHIFE/login/login.html';
         }
     }, 500); // <<<--- 500 millisaniyə (yarım saniyə) gözləmə müddəti
     // =====================================================

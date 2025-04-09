@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => { // async etdik
 
     } catch (error) {
         console.error("oda_ici.js: Auth yoxlama xətası:", error);
-        window.location.href = '../../ANA SEHIFE/login/login.html'; // Xəta olarsa da girişə yönləndir
+        window.location.href = '/ANA SEHIFE/login/login.html'; // Xəta olarsa da girişə yönləndir
         return;
     }
 });

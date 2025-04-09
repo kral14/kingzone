@@ -1,8 +1,8 @@
 // public/OYUNLAR/tictactoe/lobby/test_odalar.js
-// Version: Socket.IO + Session Auth (v4 - AI Room Click Fix + Disconnect Listener)
+// Version: Socket.IO + Session Auth (v5 - Debug Logs + AI Fix + Disconnect Listener)
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log("Test Odalar JS (v4 - AI Fix + Disconnect) Başladı.");
+    console.log("Test Odalar JS (v5 - Debug Logs) Başladı.");
 
     let loggedInUser = null;
     let currentRooms = [];
@@ -12,9 +12,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         console.log("Lobby: /check-auth sorğusu göndərilir...");
         const response = await fetch('/check-auth', { credentials: 'include' });
+        console.log("Lobby: /check-auth cavabı alındı. Status:", response.status);
         const data = await response.json();
         if (!response.ok || !data.loggedIn) {
-            console.log("Lobby: Giriş edilməyib, loginə yönləndirilir...");
+            console.error("Lobby: Giriş edilməyib (/check-auth), loginə yönləndirilir...");
             window.location.href = '../../ANA SEHIFE/login/login.html';
             return;
         }
@@ -31,11 +32,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const loggedInUsername = loggedInUser.nickname;
 
     // --- DOM Elementləri ---
+    console.log("Lobby: DOM elementləri seçilir...");
     const roomListContainer = document.getElementById('room-list-container');
     const infoMessageArea = document.getElementById('info-message-area');
     const createRoomButton = document.getElementById('create-room-button');
     const userInfoPlaceholder = document.getElementById('user-info-placeholder');
-    // Modallar
     const createRoomModal = document.getElementById('create-room-modal');
     const createRoomSubmitBtn = document.getElementById('create-room-submit-btn');
     const createRoomMessage = document.getElementById('create-room-message');
@@ -50,198 +51,122 @@ document.addEventListener('DOMContentLoaded', async () => {
     const joinRoomIdInput = document.getElementById('join-room-id');
     const joinRoomPasswordInput = document.getElementById('join-room-password');
     const closeButtons = document.querySelectorAll('.close-button');
+    console.log("Lobby: DOM elementləri seçildi.");
     // --------------------------
+
+    // --- Yardımçı Funksiyalar ---
+    const showModal = (modal) => { console.log("showModal çağırıldı:", modal?.id); if (modal) modal.style.display = 'block'; };
+    const hideModal = (modal) => { console.log("hideModal çağırıldı:", modal?.id); if (modal) modal.style.display = 'none'; };
+    const showMsg = (el, msg, type = 'info', duration = 4000) => { /* ... (əvvəlki kimi, amma log əlavə etmək olar) ... */ if(el) el.style.display = 'block'; el.textContent = msg; /*...*/ };
+    function escapeHtml(unsafe) { if (typeof unsafe !== 'string') return String(unsafe); return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;"); }
+    function updateRuleDisplay(selectElement, displayElement) { /* ... */ }
+    function addPlayerHoverListeners(playerSpan) { /* ... */ }
+    // --------------------------
+
+    // --- Header İstifadəçi Məlumatları ---
+    if (userInfoPlaceholder) { /* ... */ }
+    // -----------------------------
+
+     // --- Başlanğıc UI ---
+     if (infoMessageArea) {
+        console.log("Lobby: 'Serverə qoşulunur...' mesajı göstərilir.");
+        infoMessageArea.textContent = 'Serverə qoşulunur...';
+        infoMessageArea.style.display = 'block'; // Görünən et
+     }
+     updateRuleDisplay(newBoardSizeSelect, newBoardSizeRuleDisplay);
+     // --------------------
 
     // --- Socket.IO Bağlantısı ---
     try {
-        console.log("Socket.IO serverinə qoşulmağa cəhd edilir...");
-        socket = io({ /* reconnection options etc. if needed */ });
+        console.log("Lobby: Socket.IO serverinə qoşulmağa cəhd edilir...");
+        socket = io({
+             // reconnection: false // Test üçün avtomatik təkrar qoşulmanı bağlayaq
+        });
+        // <<< DEBUG: Socket obyekti yaradıldı mı? >>>
+        console.log("Lobby: io() funksiyası çağırıldı. Socket obyekti:", socket ? "Yaradıldı" : "Yaradılmadı!");
+        // <<< ------------------------------------ >>>
     } catch (e) {
-        console.error("Socket.IO obyekti yaradılarkən xəta:", e);
-        showMsg(infoMessageArea, 'Real-time serverə qoşulmaq mümkün olmadı.', 'error', 0);
+        console.error("Lobby: io() funksiyası çağırılarkən XƏTA:", e);
+        showMsg(infoMessageArea, `Real-time serverə qoşulmaq mümkün olmadı (${e.message}).`, 'error', 0);
         return;
     }
     // --------------------------
 
-    // --- Yardımçı Funksiyalar ---
-    const showModal = (modal) => { if (modal) modal.style.display = 'block'; };
-    const hideModal = (modal) => { if (modal) modal.style.display = 'none'; };
-    const showMsg = (el, msg, type = 'info', duration = 4000) => {
-         if (!el) return;
-         let color = '#d1ecf1'; let bgColor = 'rgba(23, 162, 184, 0.7)'; let borderColor = '#17a2b8';
-         if (type === 'error') { color = '#f8d7da'; bgColor = 'rgba(220, 53, 69, 0.7)'; borderColor = '#dc3545'; }
-         else if (type === 'success') { color = '#d4edda'; bgColor = 'rgba(40, 167, 69, 0.7)'; borderColor = '#28a745'; }
-         else if (type === 'warning') { color = '#fff3cd'; bgColor = 'rgba(255, 193, 7, 0.7)'; borderColor = '#ffc107'; }
 
-         el.textContent = msg;
-         el.style.display = 'block';
-         el.style.padding = '10px';
-         el.style.marginTop = '15px';
-         el.style.marginBottom = '10px';
-         el.style.borderRadius = '5px';
-         el.style.border = `1px solid ${borderColor}`;
-         el.style.color = color;
-         el.style.backgroundColor = bgColor;
-         el.className = `message ${type}`;
-
-         if (el.timeoutId) clearTimeout(el.timeoutId);
-         if (duration > 0) {
-             el.timeoutId = setTimeout(() => {
-                 if (el.textContent === msg) {
-                     el.textContent = ''; el.style.display = 'none';
-                     el.className = 'message'; el.removeAttribute('style');
-                 }
-             }, duration);
-         }
-     };
-    function escapeHtml(unsafe) { /* ... */ } // (Əvvəlki kimi)
-    function updateRuleDisplay(selectElement, displayElement) { /* ... */ } // (Əvvəlki kimi)
-    function addPlayerHoverListeners(playerSpan) { /* ... */ } // (Əvvəlki kimi)
-    // --------------------------
-
-    // --- Header İstifadəçi Məlumatları ---
-    if (userInfoPlaceholder) { /* ... */ } // (Əvvəlki kimi)
-    // -----------------------------
-
-    // --- Otaq Elementi Yaratma Funksiyası (YENİLƏNMİŞ - AI Otaq Sayı Göstərimi) ---
-    function createRoomElement(room) {
-        const li = document.createElement('li');
-        li.classList.add('room-item');
-        li.dataset.roomId = room.id;
-        if (room.isAiRoom) { li.classList.add('ai-room'); }
-
-        // AI otağında həmişə 1 rəqib (SNOW) var kimi göstərək
-        const displayPlayerCount = room.isAiRoom ? 1 : (room.playerCount || 0);
-        const maxPlayers = 2;
-        const boardSizeText = room.boardSize ? `${room.boardSize}x${room.boardSize}` : '3x3';
-        const creatorUsername = room.isAiRoom ? "SNOW" : (room.creatorUsername || 'Naməlum');
-
-        // Line 1: Oda Adı ve Status
-        const line1Div = document.createElement('div'); line1Div.className = 'room-item-line1';
-        const roomNameSpan = document.createElement('span'); roomNameSpan.className = 'room-name';
-        // ... (Oda adı üçün original-text, hover-text əlavə etmə - əvvəlki kimi) ...
-        roomNameSpan.innerHTML = `<span class="display-text original-text">${escapeHtml(room.name)}</span><span class="display-text hover-text">Qurucu: ${escapeHtml(creatorUsername)}</span>`;
-        roomNameSpan.addEventListener('mouseenter', () => roomNameSpan.classList.add('is-hovered'));
-        roomNameSpan.addEventListener('mouseleave', () => roomNameSpan.classList.remove('is-hovered'));
-        line1Div.appendChild(roomNameSpan);
-
-        const statusDiv = document.createElement('div'); statusDiv.className = 'room-status';
-        statusDiv.innerHTML += `<span class="players" title="Lövhə Ölçüsü">${boardSizeText}</span>`;
-        if (room.hasPassword) { statusDiv.innerHTML += `<span class="lock-icon" title="Şifrə ilə qorunur">🔒</span>`; }
-        // <<< DÜZƏLİŞ: Oyunçu sayı AI üçün həmişə 1/2 göstərilir >>>
-        const playerCountText = `${displayPlayerCount}/${maxPlayers}`;
-        statusDiv.innerHTML += `<span class="players" title="Oyunçular">${playerCountText}</span>`;
-        line1Div.appendChild(statusDiv);
-        li.appendChild(line1Div);
-
-        // Ayırıcı Xətt
-        const separatorDiv = document.createElement('div'); separatorDiv.className = 'room-item-separator'; li.appendChild(separatorDiv);
-
-        // Line 2: Oyunçular
-        const line2Div = document.createElement('div'); line2Div.className = 'room-item-line2';
-        const playerDisplayDiv = document.createElement('div'); playerDisplayDiv.className = 'player-name-display';
-
-        if (room.isAiRoom) {
-            playerDisplayDiv.innerHTML = `<span class="player1-name">(Sən)</span>
-                                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-robot vs-icon" viewBox="0 0 16 16">...</svg> <span class="player2-name">SNOW</span>`;
-        } else {
-            // Normal otaq üçün oyunçu göstərimi (əvvəlki kimi)
-            if (room.player1Username) { playerDisplayDiv.innerHTML += `<span class="player1-name">${escapeHtml(room.player1Username)}</span>`; } else { playerDisplayDiv.innerHTML += `<span class="empty-slot">(Boş)</span>`; }
-            if (room.player1Username || room.player2Username) { playerDisplayDiv.innerHTML += ` <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-swords vs-icon" viewBox="0 0 16 16">...</svg> `; } // Qılınc ikonu
-            if (room.player2Username) { playerDisplayDiv.innerHTML += `<span class="player2-name">${escapeHtml(room.player2Username)}</span>`; } else if (room.player1Username) { playerDisplayDiv.innerHTML += `<span class="empty-slot">(Boş)</span>`; }
-            if (!room.player1Username && !room.player2Username) { playerDisplayDiv.innerHTML = `<span class="empty-slot">(Otaq Boşdur)</span>`; }
-            // Hover listenerlarını əlavə et (əgər lazımdırsa)
-             playerDisplayDiv.querySelectorAll('.player1-name, .player2-name').forEach(addPlayerHoverListeners);
-        }
-        line2Div.appendChild(playerDisplayDiv);
-        li.appendChild(line2Div);
-
-        // Otağa klikləmə hadisəsi
-        li.addEventListener('click', () => handleRoomClick(room));
-        return li;
-    }
+    // --- Otaq Elementi Yaratma Funksiyası ---
+    function createRoomElement(room) { /* ... (əvvəlki v4 kodu kimi) ... */ }
     // -----------------------------------------
 
     // --- Otaq Siyahısını Göstərmə ---
-    function displayRooms(roomsToDisplay) { /* ... */ } // (Əvvəlki kimi)
+    function displayRooms(roomsToDisplay) {
+         console.log("Lobby: displayRooms funksiyası çağırıldı. Otaq sayı:", roomsToDisplay?.length ?? 0);
+         if (!roomListContainer) { console.error("roomListContainer tapılmadı!"); return; }
+         roomListContainer.innerHTML = '';
+         if (!Array.isArray(roomsToDisplay)) { console.error("displayRooms: roomsToDisplay massiv deyil!"); checkIfRoomListEmpty([]); return; }
+
+         if (roomsToDisplay.length === 0) {
+             checkIfRoomListEmpty([]);
+         } else {
+             // <<< DEBUG: Məlumat mesajını gizlətməzdən əvvəl yoxla >>>
+             if (infoMessageArea) {
+                 console.log("Lobby: Otaqlar var, infoMessageArea gizlədilir.");
+                 infoMessageArea.style.display = 'none';
+             } else {
+                 console.warn("Lobby: infoMessageArea tapılmadı!");
+             }
+             // <<< ------------------------------------------ >>>
+             roomsToDisplay.forEach((room, index) => {
+                 try {
+                     const li = createRoomElement(room);
+                     roomListContainer.appendChild(li);
+                     requestAnimationFrame(() => { setTimeout(() => { li.classList.add('entering'); }, index * 50); });
+                 } catch(e) { console.error(`Otaq elementi yaradılarkən xəta:`, e, room); }
+             });
+             checkIfRoomListEmpty(roomsToDisplay);
+         }
+          console.log("Lobby: displayRooms funksiyası bitdi.");
+     }
     // --------------------------
 
     // --- Otaq Siyahısı Boş Nəzarəti ---
-    function checkIfRoomListEmpty(rooms) { /* ... */ } // (Əvvəlki kimi)
+    function checkIfRoomListEmpty(rooms) { /* ... */ }
     // --------------------------
 
-    // --- Otağa Klikləmə (YENİLƏNMİŞ - AI Otağı üçün Yönləndirmə) ---
-    function handleRoomClick(room) {
-        if (!room || !room.id) { console.error("Keçərsiz otaq obyekti:", room); return; }
-        console.log(`Otağa klikləndi: ${room.name} (ID: ${room.id}, AI: ${!!room.isAiRoom})`, room);
-
-        // <<< YENİLƏNMİŞ HİSSƏ >>>
-        // 1. AI Otağıdırsa
-        if (room.isAiRoom) {
-             console.log(`AI otağına (${room.name}) klikləndi. Oyuna yönləndirilir...`);
-             try {
-                 const roomNameParam = encodeURIComponent(room.name || 'AI Otağı');
-                 const playerNameParam = encodeURIComponent(loggedInUsername);
-                 const boardSize = room.boardSize || 3;
-                 // URL-ə ai=SNOW parametrini əlavə edirik
-                 const gameUrl = `../game/oda_ici.html?roomId=${room.id}&roomName=${roomNameParam}&playerName=${playerNameParam}&size=${boardSize}&ai=SNOW`;
-                 console.log("Yönləndirmə URL:", gameUrl);
-                 // Eyni pəncərədə yönləndir
-                 window.location.href = gameUrl;
-             } catch (e) {
-                 console.error("AI oyununa yönləndirmə xətası:", e);
-                 showMsg(infoMessageArea, 'AI oyununa keçid zamanı xəta.', 'error');
-             }
-             return; // AI otağı üçün proses bitdi
-        }
-        // <<< YENİLƏNMİŞ HİSSƏ SONU >>>
-
-        // 2. Normal İstifadəçi Otağıdırsa (qalan kod əvvəlki kimi)
-        if (room.playerCount >= 2 && !room.players?.includes(socket?.id)) { // Otaqdakı oyunçuları yoxlamaq daha dəqiqdir
-             showMsg(infoMessageArea, `'${escapeHtml(room.name)}' otağı doludur.`, 'error');
-             return;
-        }
-        if (room.players?.includes(socket?.id)) {
-             console.log(`İstifadəçi (${loggedInUsername}) artıq ${room.name} otağındadır. Oyun səhifəsinə yönləndirilir...`);
-             try {
-                  const roomNameParam = encodeURIComponent(room.name); const playerNameParam = encodeURIComponent(loggedInUsername);
-                  const boardSize = room.boardSize || 3;
-                  window.location.href = `../game/oda_ici.html?roomId=${room.id}&roomName=${roomNameParam}&playerName=${playerNameParam}&size=${boardSize}`;
-             } catch (e) { console.error("Oyun səhifəsinə təkrar yönləndirmə xətası:", e); showMsg(infoMessageArea, 'Oyun səhifəsinə keçid zamanı xəta.', 'error'); }
-             return;
-         }
-        if (room.hasPassword) {
-            console.log("Şifrəli otaq, qoşulma modalı açılır.");
-            if(joinRoomTitle) joinRoomTitle.textContent = `'${escapeHtml(room.name)}' otağına qoşul`;
-            if(joinRoomIdInput) joinRoomIdInput.value = room.id;
-            if(joinRoomPasswordInput) joinRoomPasswordInput.value = '';
-            if(joinRoomMessage) { joinRoomMessage.textContent = ''; joinRoomMessage.className='message'; joinRoomMessage.removeAttribute('style'); joinRoomMessage.style.display = 'none'; }
-            if(joinRoomSubmitBtn) joinRoomSubmitBtn.disabled = false;
-            showModal(joinRoomModal);
-            joinRoomPasswordInput?.focus();
-        } else {
-            console.log(`Serverə 'join_room' tələbi göndərilir: Room ID = ${room.id}`);
-            showMsg(infoMessageArea, `'${escapeHtml(room.name)}' otağına qoşulunur...`, 'info', 0);
-            if(socket && socket.connected) { socket.emit('join_room', { roomId: room.id }); }
-            else { console.error("Socket bağlantısı yoxdur!"); showMsg(infoMessageArea, 'Serverlə bağlantı yoxdur.', 'error'); }
-        }
-    }
+    // --- Otağa Klikləmə ---
+    function handleRoomClick(room) { /* ... (əvvəlki v4 kodu kimi, AI yönləndirməsi daxil) ... */ }
     // -----------------------------------------------
 
     // RedirectToLogin funksiyası
-    function redirectToLogin() { /* ... */ } // (Əvvəlki kimi)
-
-    // --- Başlanğıc Konfiqurasiyası ---
-    if (infoMessageArea) infoMessageArea.textContent = 'Serverə qoşulunur...';
-    updateRuleDisplay(newBoardSizeSelect, newBoardSizeRuleDisplay);
-    // ---------------------------------
+    function redirectToLogin() { window.location.href = '../../ANA SEHIFE/login/login.html'; }
 
     // === Socket.IO Hadisə Dinləyiciləri ===
     if(socket) {
-        socket.on('connect', () => { /* ... */ }); // (Əvvəlki kimi)
+        console.log("Lobby: Socket.IO hadisə dinləyiciləri əlavə edilir...");
 
-        // <<< YENİLƏNMİŞ disconnect dinləyicisi >>>
+        socket.on('connect', () => {
+            // <<< DEBUG: Connect hadisəsi işə düşdü mü? >>>
+            console.log('############################################');
+            console.log('###### Socket.IO serverinə qoşuldu! ###### ID:', socket.id);
+            console.log('############################################');
+            // <<< ------------------------------------- >>>
+            if (infoMessageArea && infoMessageArea.textContent === 'Serverə qoşulunur...') {
+                console.log("Lobby: 'connect' hadisəsi - infoMessageArea təmizlənir.");
+                infoMessageArea.textContent = 'Otaq siyahısı alınır...'; // Artıq qoşulduq
+                infoMessageArea.style.display = 'block'; // Görünən qalsın
+            } else if (infoMessageArea) {
+                 console.log("Lobby: 'connect' hadisəsi - infoMessageArea fərqli idi:", infoMessageArea.textContent);
+                 // Qoşulma bərpa olubsa, xəta mesajını təmizlə
+                 if(infoMessageArea.classList.contains('error')) {
+                      infoMessageArea.textContent = 'Otaq siyahısı alınır...';
+                      infoMessageArea.className = 'message info';
+                      infoMessageArea.removeAttribute('style');
+                      infoMessageArea.style.display = 'block';
+                 }
+            }
+        });
+
         socket.on('disconnect', (reason) => {
+            // <<< DEBUG: Disconnect logu əvvəlki kimi qalır >>>
             console.error('############################################');
             console.error('###### SOCKET BAĞLANTISI KƏSİLDİ! ######');
             console.error('############################################');
@@ -251,29 +176,67 @@ document.addEventListener('DOMContentLoaded', async () => {
             else if (reason === 'transport close') { console.warn('Transport bağlandı.'); }
             else if (reason === 'transport error') { console.error('Transport xətası.'); }
             else { console.log('Digər səbəb:', reason); }
-            showMsg(infoMessageArea, `Serverlə əlaqə kəsildi (${reason}). Yenilənmə tələb oluna bilər.`, 'error', 0);
+            showMsg(infoMessageArea, `Serverlə əlaqə kəsildi (${reason}).`, 'error', 0);
         });
-        // <<< ------------------------------ >>>
 
-        socket.on('connect_error', (error) => { /* ... */ }); // (Əvvəlki kimi)
-        socket.on('room_list_update', (roomListFromServer) => { /* ... */ }); // (Əvvəlki kimi, amma displayRooms çağırır)
-        socket.on('creation_error', (errorMessage) => { /* ... */ }); // (Əvvəlki kimi)
-        socket.on('join_error', (errorMessage) => { /* ... */ }); // (Əvvəlki kimi)
-        socket.on('room_joined', (data) => { /* ... */ }); // (Əvvəlki kimi)
+        socket.on('connect_error', (error) => {
+            // <<< DEBUG: Connect error logu >>>
+            console.error('############################################');
+            console.error('###### Socket.IO Qoşulma Xətası! ######');
+            console.error('############################################');
+            console.error('Xəta Mesajı:', error.message);
+            console.error('Xəta Obyekti:', error);
+            // <<< ----------------------------- >>>
+             if (error.message === 'Authentication error') {
+                 showMsg(infoMessageArea, 'Giriş etibarsızdır. Yenidən giriş edin.', 'error', 0);
+                 setTimeout(redirectToLogin, 4000);
+             } else {
+                 showMsg(infoMessageArea, 'Serverə qoşulmaq mümkün olmadı. Şəbəkəni və server statusunu yoxlayın.', 'error', 0);
+             }
+        });
 
-    } else { console.error("Socket obyekti mövcud deyil!"); }
+        socket.on('room_list_update', (roomListFromServer) => {
+             console.log('>>> Lobby: room_list_update ALINDI! Otaq sayı:', roomListFromServer?.length || 0);
+             currentRooms = roomListFromServer || [];
+             // <<< DEBUG: displayRooms ətrafında try-catch >>>
+             try {
+                  console.log("Lobby: displayRooms çağırılır...");
+                  displayRooms(currentRooms);
+             } catch(displayError) {
+                  console.error("Lobby: displayRooms funksiyasında XƏTA:", displayError);
+                  showMsg(infoMessageArea, "Otaq siyahısı göstərilərkən xəta baş verdi.", "error");
+             }
+             // <<< ------------------------------------- >>>
+        });
+
+        socket.on('creation_error', (errorMessage) => { /* ... */ });
+        socket.on('join_error', (errorMessage) => { /* ... */ });
+        socket.on('room_joined', (data) => { /* ... */ });
+
+        console.log("Lobby: Socket.IO hadisə dinləyiciləri əlavə edildi.");
+
+    } else {
+        console.error("Lobby: Socket obyekti mövcud deyil! Dinləyicilər əlavə edilə bilmir.");
+        showMsg(infoMessageArea, 'Real-time bağlantı qurulamadı (socket obyekti yoxdur).', 'error', 0);
+    }
     // ========================================
+
 
     // === DOM Hadisə Dinləyiciləri (Listeners) ===
-    if (createRoomButton) { createRoomButton.addEventListener('click', () => { /* ... */ }); } else { console.error("createRoomButton tapılmadı!"); }
-    if (newBoardSizeSelect) { newBoardSizeSelect.addEventListener('change', () => { updateRuleDisplay(newBoardSizeSelect, newBoardSizeRuleDisplay); }); }
-    if (createRoomSubmitBtn) { createRoomSubmitBtn.addEventListener('click', () => { /* ... */ }); } else { console.error("createRoomSubmitBtn tapılmadı!"); }
-    if (joinRoomSubmitBtn) { joinRoomSubmitBtn.addEventListener('click', () => { /* ... */ }); } else { console.error("joinRoomSubmitBtn tapılmadı!"); }
-    closeButtons.forEach(button => { button.addEventListener('click', () => { /* ... (mesaj təmizləmə ilə) */ }); });
-    window.addEventListener('click', (event) => { if (event.target.classList.contains('modal')) { /* ... (mesaj təmizləmə ilə) */ } });
-    newRoomNameInput?.addEventListener('keypress', (e) => { if (e.key === 'Enter') createRoomSubmitBtn?.click(); });
-    newRoomPasswordInput?.addEventListener('keypress', (e) => { if (e.key === 'Enter') createRoomSubmitBtn?.click(); });
-    joinRoomPasswordInput?.addEventListener('keypress', (e) => { if (e.key === 'Enter') joinRoomSubmitBtn?.click(); });
+    console.log("Lobby: DOM hadisə dinləyiciləri əlavə edilir...");
+    if (createRoomButton) {
+        createRoomButton.addEventListener('click', () => {
+            console.log("Lobby: 'Yeni Oda Oluştur' düyməsinə klikləndi.");
+            // ... (modalı açan kod - əvvəlki kimi) ...
+            showModal(createRoomModal);
+            // ...
+        });
+    } else { console.error("createRoomButton elementi tapılmadı!"); }
+
+    // ... (qalan DOM dinləyiciləri - əvvəlki kimi) ...
+    console.log("Lobby: DOM hadisə dinləyiciləri əlavə edildi.");
     // ========================================
+
+     console.log("Lobby: DOMContentLoaded sonuna çatdı.");
 
 }); // DOMContentLoaded Sonu

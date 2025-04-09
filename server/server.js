@@ -1,5 +1,5 @@
-// server.js (v4.1 - Loglama ilə)
-// Part 1/3 - Setup, Middleware (Logging daxil), Helpers
+// server.js (v4.1 - Loglama + Düzəldilmiş Statik Yol ilə)
+// Part 1/3 - Setup, Middleware, Helpers
 
 // ---- Əsas Modulların Import Edilməsi ----
 require('dotenv').config();
@@ -91,22 +91,17 @@ console.log(`[Setup] Session cookie ayarları: secure=${process.env.NODE_ENV ===
 // ---- Digər Middleware-lər ----
 app.use(express.json());
 
-// <<<--- YENİ LOGLAMA KODU --->>>
-// Bu kod express.static-dən əvvəl gəlməlidir
+// <<<--- LOGLAMA KODU --->>>
 app.use((req, res, next) => {
-    // .js faylları və ya /OYUNLAR/ yolunu ehtiva edən sorğuları logla
-    if (req.url.endsWith('.js') || req.url.includes('/OYUNLAR/')) {
+    if (req.url.endsWith('.js') || req.url.includes('/OYUNLAR/') || req.url.includes('/ANA SEHIFE/')) { // İzləmə üçün genişləndirildi
         console.log(`[Request Log] Request: ${req.method} ${req.url}`);
     }
-    // İstəsəniz, bütün sorğuları daha ətraflı loglaya bilərsiniz:
-    // const now = new Date().toISOString();
-    // console.log(`[Request Log] ${now} - ${req.method} ${req.originalUrl} - SessionID: ${req.sessionID}`);
-    next(); // Növbəti middleware-ə keç
+    next();
 });
 // <<<--- LOGLAMA KODU SONU --->>>
 
-// Statik faylların yolu
-const publicDirectoryPath = path.join(__dirname, 'public');
+// Statik faylların yolu --- DÜZƏLDİLMİŞ YOL ---
+const publicDirectoryPath = path.join(__dirname, '../public'); // <-- Dəyişiklik burada edildi
 app.use(express.static(publicDirectoryPath));
 console.log('[Setup] JSON parser və Static files middleware tətbiq edildi. Statik qovluq:', publicDirectoryPath);
 
@@ -185,7 +180,7 @@ function createDefaultRooms() {
 }
 
 // --- Part 1/3 Sonu ---
-// server.js (v4.1 - Loglama ilə)
+// server.js (v4.1 - Loglama + Düzəldilmiş Statik Yol ilə)
 // Part 2/3 - HTTP API Routes
 
 // ==========================================
@@ -439,14 +434,21 @@ app.put('/profile/:nickname', isAuthenticated, async (req, res) => {
 // ----- Default Kök Route (/) -----
 app.get('/', (req, res) => {
     if (req.session && req.session.user && req.session.user.id) {
+        // Kök domainə girildikdə oyunlar səhifəsinə yönləndir (əgər public server içindədirsə)
+        // res.redirect('/OYUNLAR/oyunlar/oyunlar.html'); 
+        // Əgər public bir üst qovluqdadırsa, Express static onsuz da index.html axtarmırsa, 
+        // login/register-ə yönləndirmək daha məntiqli ola bilər, çünki statik fayl tapılmayacaq.
+        // Ancaq bizim halda statik middleware artıq var, o, kök domain üçün index.html axtaracaq (əgər varsa).
+        // Ona görə burada oyunlar səhifəsinə yönləndirmək daha doğrudur.
         res.redirect('/OYUNLAR/oyunlar/oyunlar.html');
     } else {
+         // Əgər giriş edilməyibsə, login səhifəsinə yönləndir
         res.redirect('/ANA SEHIFE/login/login.html');
     }
 });
 
 // --- Part 2/3 Sonu ---
-// server.js (v4.1 - Loglama ilə)
+// server.js (v4.1 - Loglama + Düzəldilmiş Statik Yol ilə)
 // Part 3/3 - Socket.IO Logic & Server Start
 
 // ============================================

@@ -550,8 +550,8 @@ app.get('/', (req, res) => {
 
 
 // --- Part 2 Sonu ---
-// server.js
-// Part 3/3 - Socket.IO Logic & Server Start
+// server.js (PostgreSQL + DB Session Store ilə Tam Yenilənmiş v4)
+// Part 3/3 - Socket.IO Logic & Server Start (DƏYİŞİKLİKLƏRLƏ)
 
 // ... (Part 1 və Part 2-dən sonra gələn kod: require-lar, setup, API routes) ...
 
@@ -570,7 +570,7 @@ console.log('[Setup] Socket.IO üçün session middleware tətbiq edildi.');
 // Socket.IO bağlantılarını yalnız giriş etmiş istifadəçilər üçün qəbul et
 io.use((socket, next) => {
   if (socket.request.session && socket.request.session.user && socket.request.session.user.nickname) {
-    socket.user = { ...socket.request.session.user };
+    socket.user = { ...socket.request.session.user }; // Sessiyadan user məlumatını socket obyektinə kopyala
     console.log(`[Socket Auth] Socket üçün user təyin edildi: ${socket.user.nickname} (Socket ID: ${socket.id})`);
     next();
   } else {
@@ -587,8 +587,10 @@ io.on('connection', (socket) => {
 
   // İstifadəçini 'users' yaddaş obyektinə əlavə et
   users[socket.id] = {
-      id: socket.id, userId: socket.user.id,
-      username: socket.user.nickname, currentRoom: null
+      id: socket.id,
+      userId: socket.user.id, // DB-dən gələn user ID
+      username: socket.user.nickname,
+      currentRoom: null // Başlanğıcda heç bir otaqda deyil
   };
 
   // Qoşulan istifadəçiyə otaq siyahısını göndər
@@ -622,7 +624,7 @@ io.on('connection', (socket) => {
     // Validasiyalar
     if (!data || !data.name || data.name.trim().length === 0) return socket.emit('creation_error', 'Otaq adı boş ola bilməz.');
     if (data.password && data.password.length > 0 && (data.password.length < 2 || !(/[a-zA-Z]/.test(data.password) && /\d/.test(data.password)))) {
-        return socket.emit('creation_error', 'Şifrə tələblərə uyğun deyil (min 2 krk, 1 hərf+1 rəqəm).');
+         return socket.emit('creation_error', 'Şifrə tələblərə uyğun deyil (min 2 krk, 1 hərf+1 rəqəm).');
     }
     if (currentUserSocketInfo.currentRoom) return socket.emit('creation_error', 'Siz artıq başqa bir otaqdasınız.');
 
@@ -632,24 +634,24 @@ io.on('connection', (socket) => {
 
     const newRoom = {
       id: newRoomId, name: data.name.trim().slice(0, 30), password: data.password || null,
-      players: [socket.id], // Yaradan hələ ki, tək oyunçudur
+      players: [socket.id], // Yaradan ilk oyunçudur
       boardSize: validatedBoardSize, creatorUsername: user.nickname,
       gameState: null, isAiRoom: false
     };
 
     rooms[newRoomId] = newRoom;
-    currentUserSocketInfo.currentRoom = newRoomId; // İstifadəçinin cari otağını təyin et
+    currentUserSocketInfo.currentRoom = newRoomId;
+    socket.join(newRoomId); // Yaradanı da otağa qoşaq
 
     console.log(`[create_room] Otaq yaradıldı: ID=${newRoomId}, Adı=${newRoom.name}, Yaradan=${user.nickname}, Ölçü=${newRoom.boardSize}, Şifrəli=${!!newRoom.password}`);
 
-    // AVTOMATİK GİRİŞ ETMƏ - Yaradana 'room_joined' göndərmirik
-
-    // Bütün clientlərə yenilənmiş otaq siyahısını göndər
+    // Yaradan clientə otağa qoşulduğunu bildirməyə ehtiyac yoxdur, çünki səhifəni özü yeniləyəcək və ya başqa axış olacaq.
+    // Amma siyahını yeniləmək lazımdır.
     broadcastRoomList();
     console.log(`[create_room] Otaq yaradıldıqdan sonra broadcastRoomList çağırıldı.`);
   });
 
-  // ----- Qoşulma zamanı silməni ləğv etmək üçün 'join_room' hadisəsi (YENİLƏNMİŞ) -----
+  // ----- Otağa Qoşulma (DƏYİŞİKLİKLƏRLƏ) -----
   socket.on('join_room', (data) => {
     const user = socket.user;
     const currentUserSocketInfo = users[socket.id];
@@ -662,76 +664,173 @@ io.on('connection', (socket) => {
 
     // Yoxlamalar
     if (!room) return socket.emit('join_error', 'Otaq tapılmadı.');
-    if (room.isAiRoom) return socket.emit('join_error', 'AI otağına bu şəkildə qoşulmaq olmaz.'); // AI otaqları üçün xəta
+    if (room.isAiRoom) return socket.emit('join_error', 'AI otağına bu şəkildə qoşulmaq olmaz.'); // AI otaqları lobidən birbaşa kliklə açılır
     if (currentUserSocketInfo.currentRoom && currentUserSocketInfo.currentRoom !== room.id) return socket.emit('join_error', 'Siz artıq başqa bir otaqdasınız.');
-    if (room.players.includes(socket.id)) { // Əgər artıq otaqdadırsa (refresh və s.)
+    if (room.players.includes(socket.id)) {
          console.warn(`[join_room] ${user.nickname} artıq bu otaqdadır (${room.id}). 'room_joined' göndərilir.`);
-         socket.join(room.id); // Socket otağına qoşulsun
-         currentUserSocketInfo.currentRoom = room.id; // Təsdiqlə
-         // Əgər silinmə gözləyirdisə, ləğv et
+         socket.join(room.id);
+         currentUserSocketInfo.currentRoom = room.id;
          if (room.deleteTimeout) { clearTimeout(room.deleteTimeout); delete room.deleteTimeout; console.log(`[join_room] Otaq ${room.id} üçün planlanmış silmə ləğv edildi.`); }
          return socket.emit('room_joined', { roomId: room.id, roomName: room.name, boardSize: room.boardSize });
-     }
+    }
     if (room.players.length >= 2) return socket.emit('join_error', 'Otaq doludur.');
 
     // Şifrə yoxlaması
     if (room.password) {
-        if (!data.password) return socket.emit('join_error', 'Bu otaq şifrəlidir. Şifrəni daxil edin.');
-        if (room.password !== data.password) return socket.emit('join_error', 'Şifrə yanlışdır.');
+         if (!data.password) return socket.emit('join_error', 'Bu otaq şifrəlidir. Şifrəni daxil edin.');
+         if (room.password !== data.password) return socket.emit('join_error', 'Şifrə yanlışdır.');
          console.log(`[join_room] Şifrəli otaq (${data.roomId}) üçün şifrə doğrudur.`);
     }
 
-    // <<< YENİ: Əgər otaq silinməyi gözləyirdisə, timeout-u ləğv et >>>
+    // Silinmə timeout-unu ləğv et
     if (room.deleteTimeout) {
-        console.log(`[join_room] Otaq ${room.id} üçün planlanmış silmə ləğv edilir (yeni oyunçu qoşuldu).`);
-        clearTimeout(room.deleteTimeout);
-        delete room.deleteTimeout; // Timeout referansını sil
+         console.log(`[join_room] Otaq ${room.id} üçün planlanmış silmə ləğv edilir.`);
+         clearTimeout(room.deleteTimeout);
+         delete room.deleteTimeout;
     }
-    // <<< ---------------------------------------------------- >>>
 
     // Otağa qoşulma
     room.players.push(socket.id);
     currentUserSocketInfo.currentRoom = room.id;
-    socket.join(room.id); // Socket.IO otağına qoşul
+    socket.join(room.id);
 
     console.log(`[join_room] İstifadəçi ${user.nickname} (${socket.id}) otağa qoşuldu: ${room.name} (${room.id})`);
+    // Qoşulan istifadəçiyə təsdiq göndər
     socket.emit('room_joined', { roomId: room.id, roomName: room.name, boardSize: room.boardSize });
-    broadcastRoomList(); // Otaq siyahısını yenilə
+    // Otaq siyahısını yenilə (oyunçu sayı dəyişdi)
+    broadcastRoomList();
 
-    // İkinci oyunçu qoşulduqda rəqib məlumatını göndər
+    // <<< DƏYİŞİKLİK BAŞLANĞICI: Problem 2 Həlli >>>
+    // İkinci oyunçu qoşulduqda hər iki tərəfə rəqib məlumatını göndər
     if (room.players.length === 2) {
-        console.log(`[join_room] Otaq ${room.id} doldu. Rəqib məlumatları göndərilir...`);
-        const player1SocketId = room.players[0];
-        const player2SocketId = room.players[1];
-        const player1Info = users[player1SocketId];
-        const player2Info = users[player2SocketId];
-        if (player1Info && io.sockets.sockets.get(player1SocketId)) {
-            io.to(player1SocketId).emit('opponent_joined', { username: player2Info?.username || 'Rəqib' });
-        }
+         console.log(`[join_room] Otaq ${room.id} doldu. Rəqib məlumatları göndərilir...`);
+         const player1SocketId = room.players[0];
+         const player2SocketId = room.players[1]; // Bu qoşulan socket.id olacaq
+         const player1Info = users[player1SocketId];
+         const player2Info = users[player2SocketId]; // Bu qoşulan user məlumatı (user) olacaq
+
+         // Birinci oyunçuya ikinci oyunçunun məlumatını göndər
+         if (player1Info && io.sockets.sockets.get(player1SocketId)) {
+             console.log(`---> ${player1Info.username}-ə ${player2Info?.username}-in qoşulduğu bildirilir.`);
+             io.to(player1SocketId).emit('opponent_joined', { username: player2Info?.username || 'Rəqib' });
+         } else {
+             console.warn(`[join_room] Birinci oyunçu (${player1SocketId}) tapılmadı və ya socketi yoxdur.`);
+         }
+
+         // İkinci (yeni qoşulan) oyunçuya birinci oyunçunun məlumatını göndər
+         // socket özü player2SocketId olduğu üçün birbaşa socket.emit istifadə edə bilərik
+         if (player1Info) {
+              console.log(`---> ${player2Info?.username}-ə ${player1Info.username}-in otaqda olduğu bildirilir.`);
+              socket.emit('opponent_joined', { username: player1Info.username || 'Rəqib' });
+         } else {
+             console.warn(`[join_room] Birinci oyunçu məlumatı (${player1SocketId}) tapılmadı.`);
+             socket.emit('opponent_joined', { username: 'Rəqib' }); // Fallback
+         }
     }
+    // <<< DƏYİŞİKLİK SONU >>>
   });
 
   socket.on('leave_room', () => {
       console.log(`[Socket Event] leave_room hadisəsi (${socket.user?.nickname || socket.id})`);
-    handleDisconnectOrLeave(socket);
+      handleDisconnectOrLeave(socket);
   });
 
+  // ----- Otaq Silmə Hadisəsi -----
+  socket.on('delete_room', (data) => {
+      const user = socket.user;
+      const currentUserSocketInfo = users[socket.id];
+      console.log(`[Socket Event] delete_room hadisəsi (${user?.nickname || 'Bilinməyən'}):`, data);
+
+      if (!user || !currentUserSocketInfo) return socket.emit('delete_error', 'İstifadəçi məlumatları tapılmadı.');
+      if (!data || !data.roomId) return socket.emit('delete_error', 'Otaq ID göndərilmədi.');
+
+      const room = rooms[data.roomId];
+      if (!room) return socket.emit('delete_error', 'Silinəcək otaq tapılmadı.');
+      if (room.isAiRoom) return socket.emit('delete_error', 'AI otaqları silinə bilməz.');
+      // Yalnız otağın yaradanı silə bilər
+      if (room.creatorUsername !== user.nickname) return socket.emit('delete_error', 'Yalnız otağı yaradan onu silə bilər.');
+
+      console.log(`[delete_room] Otaq ${data.roomId} ('${room.name}') ${user.nickname} tərəfindən silinir.`);
+
+      // Əgər otaqda başqaları varsa, onları məlumatlandır və çıxart (istəyə bağlı)
+      room.players.forEach(playerId => {
+          const playerSocket = io.sockets.sockets.get(playerId);
+          if (playerSocket && playerId !== socket.id) { // Özünə göndərmə
+              playerSocket.emit('room_deleted_kick', { message: `'${room.name}' otağı yaradan tərəfindən silindi.` });
+              playerSocket.leave(data.roomId); // Socket otağından çıxart
+              if (users[playerId]) { users[playerId].currentRoom = null; } // İstifadəçinin statusunu yenilə
+          }
+      });
+
+      // Yaradanın öz statusunu yenilə
+      currentUserSocketInfo.currentRoom = null;
+      socket.leave(data.roomId);
+
+      // Otağı sil
+      delete rooms[data.roomId];
+      // Otaq silinmə timeout-unu ləğv et (əgər varsa)
+      if (room.deleteTimeout) {
+          clearTimeout(room.deleteTimeout);
+      }
+
+      // Siyahını yenilə
+      broadcastRoomList();
+      console.log(`[delete_room] Otaq ${data.roomId} silindi və siyahı yeniləndi.`);
+      // Silmə təsdiqini göndərməyə bilərik, çünki siyahı yenilənəcək
+      // socket.emit('delete_success', 'Otaq uğurla silindi.');
+  });
+
+
   // ----- Oyun Gedişləri və Digər Oyun İçi Hadisələr -----
-  socket.on('make_move', (data) => { /* ... (əvvəlki kimi) ... */ });
-  socket.on('request_restart', () => { /* ... (əvvəlki kimi) ... */ });
-  socket.on('accept_restart', () => { /* ... (əvvəlki kimi) ... */ });
+  // Bu hissələri də aktiv etmək və oda_ici.js ilə sinxronlaşdırmaq lazım gələcək
+  socket.on('make_move', (data) => {
+       const user = socket.user;
+       const currentUserSocketInfo = users[socket.id];
+       const roomId = currentUserSocketInfo?.currentRoom;
+       console.log(`[Socket Event] make_move (${user?.nickname}) Otaq: ${roomId}, Data:`, data);
+       if (roomId && rooms[roomId]) {
+            // Yalnız otaqdakı digər oyunçu(lar)a göndər
+            socket.to(roomId).emit('opponent_moved', data);
+       } else {
+            console.warn(`make_move: İstifadəçi (${user?.nickname}) heç bir otaqda deyil və ya otaq tapılmadı.`);
+       }
+   });
+
+   socket.on('dice_roll_result', (data) => {
+        const user = socket.user;
+        const currentUserSocketInfo = users[socket.id];
+        const roomId = currentUserSocketInfo?.currentRoom;
+        console.log(`[Socket Event] dice_roll_result (${user?.nickname}) Otaq: ${roomId}, Data:`, data);
+        if (roomId && rooms[roomId]) {
+            // Rəqibə bu oyunçunun zər nəticəsini göndər
+            socket.to(roomId).emit('opponent_dice_result', { username: user.nickname, roll: data.roll });
+        }
+   });
+
+   socket.on('symbol_choice', (data) => {
+        const user = socket.user;
+        const currentUserSocketInfo = users[socket.id];
+        const roomId = currentUserSocketInfo?.currentRoom;
+        console.log(`[Socket Event] symbol_choice (${user?.nickname}) Otaq: ${roomId}, Data:`, data);
+         if (roomId && rooms[roomId]) {
+             // Rəqibə bu oyunçunun simvol seçimini (və ya başlayan simvolu) göndər
+             socket.to(roomId).emit('opponent_symbol_chosen', { username: user.nickname, symbol: data.symbol });
+         }
+   });
+
 
   // ----- Bağlantı Kəsildikdə -----
   socket.on('disconnect', (reason) => {
-    const userInfo = users[socket.id];
+    const userInfo = users[socket.id]; // users artıq silinmiş ola bilər, ona görə yoxlama vacibdir
     console.log(`[Socket Disconnect] İstifadəçi ayrıldı: ${userInfo?.username || socket.id}. Səbəb: ${reason}`);
     handleDisconnectOrLeave(socket);
+    // 'users' obyektindən silmə handleDisconnectOrLeave içində edilir
   });
 
-  // ----- Otaqdan Ayrılma / Bağlantı Kəsilmə Funksiyası (GECİKMƏLİ SİLMƏ İLƏ) -----
+  // ----- Otaqdan Ayrılma / Bağlantı Kəsilmə Funksiyası (DƏYİŞİKLİKLƏRLƏ) -----
   function handleDisconnectOrLeave(socketInstance) {
     const socketId = socketInstance.id;
-    const leavingUserInfo = users[socketId];
+    const leavingUserInfo = users[socketId]; // Çıxan istifadəçinin məlumatını alaq
 
     if (!leavingUserInfo) {
          console.log(`[handleDisconnectOrLeave] İstifadəçi (${socketId}) users obyektində tapılmadı/çıxarılıb.`);
@@ -742,7 +841,7 @@ io.on('connection', (socket) => {
     const username = leavingUserInfo.username;
 
     console.log(`[handleDisconnectOrLeave] İstifadəçi: ${username} (${socketId}), Otaq: ${roomId || 'Yoxdur'}`);
-    delete users[socketId]; // İstifadəçini users siyahısından sil
+    delete users[socketId]; // İstifadəçini qlobal 'users' siyahısından sil
 
     if (roomId && rooms[roomId]) {
       console.log(`[handleDisconnectOrLeave] ${username} ${roomId} otağından çıxarılır...`);
@@ -750,43 +849,56 @@ io.on('connection', (socket) => {
       const playerIndex = room.players.indexOf(socketId);
 
       if (playerIndex > -1) {
-          room.players.splice(playerIndex, 1);
+          room.players.splice(playerIndex, 1); // Oyunçunu otaqdan sil
           console.log(`[handleDisconnectOrLeave] ${username} otağın oyunçularından silindi. Qalan oyunçu sayı: ${room.players.length}`);
 
+          // <<< DƏYİŞİKLİK BAŞLANĞICI: Problem 1 Həlli >>>
           if (room.players.length === 0 && !room.isAiRoom) {
-                // Əgər otaq üçün artıq silmə timeout-u varsa, onu ləğv etmə (problem olmamalıdır)
-                if (room.deleteTimeout) {
-                     console.warn(`[handleDisconnectOrLeave] Otaq ${roomId} üçün artıq silmə timeout-u var idi? Bu gözlənilməzdir.`);
-                     clearTimeout(room.deleteTimeout);
-                }
-                console.log(`[handleDisconnectOrLeave] İstifadəçi otağı ${roomId} boş qaldı. Silinməsi üçün ${30} saniyə gözlənilir...`);
-                room.deleteTimeout = setTimeout(() => {
-                     if (rooms[roomId] && rooms[roomId].players.length === 0) { // Hələ də boşdursa sil
-                          console.log(`[handleDisconnectOrLeave] Gecikmə bitdi. Otaq ${roomId} ('${room.name}') silinir.`);
-                          delete rooms[roomId];
-                          broadcastRoomList(); // Silindikdən sonra siyahını yenilə
-                     } else {
-                          console.log(`[handleDisconnectOrLeave] Otaq ${roomId} silinmədi (timeout zamanı kimsə qoşuldu və ya artıq silinib).`);
-                     }
-                }, 30000); // 30 saniyə
+              // Əgər otaq üçün artıq silmə timeout-u varsa, ləğv etməyə ehtiyac yoxdur, yenisini quraq
+              if (room.deleteTimeout) {
+                  console.warn(`[handleDisconnectOrLeave] Otaq ${roomId} üçün köhnə silmə timeout-u ləğv edilir.`);
+                  clearTimeout(room.deleteTimeout);
+              }
+              const deletionDelay = 300000; // 5 dəqiqə (milisaniyə)
+              console.log(`[handleDisconnectOrLeave] İstifadəçi otağı ${roomId} boş qaldı. Silinməsi üçün ${deletionDelay / 1000 / 60} dəqiqə gözlənilir...`);
+              room.deleteTimeout = setTimeout(() => {
+                  // Timeout bitdikdə otağın hələ də mövcud və boş olduğunu yoxla
+                  if (rooms[roomId] && rooms[roomId].players.length === 0) {
+                      console.log(`[handleDisconnectOrLeave] Gecikmə bitdi. Otaq ${roomId} ('${room.name}') silinir.`);
+                      delete rooms[roomId];
+                      broadcastRoomList(); // Otaq silindikdən sonra siyahını yenilə
+                  } else {
+                      console.log(`[handleDisconnectOrLeave] Otaq ${roomId} silinmədi (timeout zamanı kimsə qoşuldu və ya artıq silinib).`);
+                      // Əgər kimsə qoşulubsa, timeout referansı onsuz da 'join_room' içində silinmiş olmalıdır.
+                      // Ehtiyat üçün burada da silək:
+                      if(rooms[roomId]) delete rooms[roomId].deleteTimeout;
+                  }
+              }, deletionDelay); // 5 dəqiqə gözlə
+          // <<< DƏYİŞİKLİK SONU >>>
           } else if (room.players.length === 0 && room.isAiRoom) {
-                console.log(`[handleDisconnectOrLeave] AI/Default otaq ${roomId} boş qaldı, silinmir.`);
-          } else if (room.players.length > 0) { // Otaqda oyunçu qaldısa
-            const remainingPlayerId = room.players[0];
-            const remainingPlayerSocket = io.sockets.sockets.get(remainingPlayerId);
-            if (remainingPlayerSocket) {
-                console.log(`[handleDisconnectOrLeave] Qalan oyunçuya (${users[remainingPlayerId]?.username}) rəqibin (${username}) ayrıldığı bildirilir.`);
-                remainingPlayerSocket.emit('opponent_left_game', { username: username });
-            }
-            if (room.creatorUsername === username) { // Yaradanı dəyiş
-                 room.creatorUsername = users[remainingPlayerId]?.username || 'Naməlum';
-                 console.log(`[handleDisconnectOrLeave] Otaq yaradanı ${room.creatorUsername}-ə dəyişdirildi.`);
-            }
+              console.log(`[handleDisconnectOrLeave] AI/Default otaq ${roomId} boş qaldı, silinmir.`);
+              // AI otağının playerCount-u onsuz da broadcastRoomList-də düzgün hesablanacaq (0 olacaq)
+          } else if (room.players.length === 1) { // Otaqda bir oyunçu qaldısa
+              const remainingPlayerId = room.players[0];
+              const remainingPlayerSocket = io.sockets.sockets.get(remainingPlayerId);
+              if (remainingPlayerSocket) {
+                  console.log(`[handleDisconnectOrLeave] Qalan oyunçuya (${users[remainingPlayerId]?.username}) rəqibin (${username}) ayrıldığı bildirilir.`);
+                  // <<< DƏYİŞİKLİK BAŞLANĞICI: Problem 2 Həlli (Davamı) >>>
+                  remainingPlayerSocket.emit('opponent_left_game', { username: username });
+                  // <<< DƏYİŞİKLİK SONU >>>
+              }
+              // Yaradan ayrılıbsa, qalan oyunçunu yeni yaradan təyin et
+              if (room.creatorUsername === username) {
+                  room.creatorUsername = users[remainingPlayerId]?.username || 'Naməlum';
+                  console.log(`[handleDisconnectOrLeave] Otaq yaradanı ${room.creatorUsername}-ə dəyişdirildi.`);
+              }
           }
-          broadcastRoomList(); // Oyunçu sayı/adı dəyişdiyi üçün siyahını yenilə
+          // Otaq siyahısını yenilə (oyunçu sayı, yaradan adı və s. dəyişə bilər)
+          broadcastRoomList();
       } else {
-           console.warn(`[handleDisconnectOrLeave] ${username} (${socketId}) ${roomId} otağının oyunçuları arasında tapılmadı?`);
-           broadcastRoomList();
+          // Bu hal normalda baş verməməlidir, əgər istifadəçi otaqdadırsa
+          console.warn(`[handleDisconnectOrLeave] ${username} (${socketId}) ${roomId} otağının oyunçuları arasında tapılmadı?`);
+          broadcastRoomList(); // Hər ehtimala qarşı siyahını yenilə
       }
     } else {
       console.log(`[handleDisconnectOrLeave] ${username} heç bir otaqda deyildi.`);
@@ -805,13 +917,31 @@ server.listen(PORT, () => {
     console.log(`---- Server ${PORT} portunda uğurla işə düşdü! ----`);
     console.log(`---- Canlı Ünvan (təxmini): http://localhost:${PORT} (Render öz URL-ini təqdim edəcək) ----`);
     console.log(`---- Server Başlama Zamanı: ${startTime} ----`);
-    // <<< Standart AI Otaqlarını Yarat >>>
+    // Standart AI Otaqlarını Yarat
     createDefaultRooms();
     console.log('=======================================================');
 });
 
 // ----- Serverin Düzgün Dayanması -----
-function gracefulShutdown(signal) { /* ... (əvvəlki kimi) ... */ }
+function gracefulShutdown(signal) {
+  console.log(`\n${signal} siqnalı alındı. Server bağlanır...`);
+  io.close(() => {
+    console.log('[Shutdown] Bütün socket bağlantıları bağlandı.');
+    server.close(() => {
+      console.log('[Shutdown] HTTP server bağlandı.');
+      pool.end(() => {
+        console.log('[Shutdown] PostgreSQL bağlantı pool-u bağlandı.');
+        process.exit(0);
+      });
+    });
+  });
+
+  // Əgər müəyyən müddət ərzində bağlanmazsa, zorla çıx
+  setTimeout(() => {
+    console.error('[Shutdown] Graceful shutdown vaxtı bitdi, proses zorla dayandırılır.');
+    process.exit(1);
+  }, 10000); // 10 saniyə
+}
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 

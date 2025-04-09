@@ -25,7 +25,6 @@
             <h1 id="room-name">Otaq Yüklənir...</h1>
             <div class="header-buttons">
                  <button id="edit-room-btn" class="button icon-button" title="Otaq Ayarları" style="display: none;"><i class="fas fa-cog"></i></button>
-                 <button id="call-snow-btn" class="button primary-button" title="Yapay Zeka ilə Oyna" style="display: none;"><i class="fas fa-robot"></i> SNOW'u Çağır</button>
                  <button id="kick-opponent-btn" class="button danger-button icon-button" title="Rəqibi Çıxart" style="display: none;"><i class="fas fa-user-slash"></i></button>
                  <button id="leave-room-btn" class="button danger-button">Otaqdan Ayrıl</button>
             </div>
@@ -59,26 +58,72 @@
             <span class="close-button" data-modal-id="edit-room-modal">&times;</span>
             <h3>Otaq Ayarları</h3>
             <div class="modal-body">
-                <div class="input-group"> <label for="edit-room-name">Otaq Adı</label> <input type="text" id="edit-room-name" name="roomName" required maxlength="25" autocomplete="off"> </div>
-                <div class="input-group"> <label for="edit-room-password-check">Şifrəli Otaq</label> <input type="checkbox" id="edit-room-password-check" name="hasPassword" style="width: auto; vertical-align: middle;"> <input type="password" id="edit-room-password" name="roomPassword" placeholder="Yeni şifrə (əgər seçilibsə)" style="margin-top: 8px; display: none;"> </div>
-                <div class="input-group"> <label for="edit-board-size">Taxta Ölçüsü</label> <select id="edit-board-size" name="boardSize"> <option value="3">3x3</option> <option value="4">4x4</option> <option value="5">5x5</option> <option value="6">6x6</option> </select> </div>
-                <div class="modal-actions"> <button type="button" id="save-room-changes-btn" class="button primary-button">Yadda Saxla</button> <button type="button" id="delete-room-confirm-btn" class="button danger-button modal-delete-button">Otağı Sil</button> </div>
+                <div class="input-group">
+                    <label for="edit-room-name">Otaq Adı</label>
+                    <input type="text" id="edit-room-name" name="roomName" required maxlength="25" autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <label for="edit-room-password-check">Şifrəli Otaq</label>
+                    <input type="checkbox" id="edit-room-password-check" name="hasPassword" style="width: auto; vertical-align: middle;">
+                    <input type="password" id="edit-room-password" name="roomPassword" placeholder="Yeni şifrə (əgər seçilibsə)" style="margin-top: 8px; display: none;">
+                </div>
+                <div class="input-group">
+                    <label for="edit-board-size">Taxta Ölçüsü</label>
+                    <select id="edit-board-size" name="boardSize">
+                        <option value="3">3x3</option>
+                        <option value="4">4x4</option>
+                        <option value="5">5x5</option>
+                        <option value="6">6x6</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="save-room-changes-btn" class="button primary-button">Yadda Saxla</button>
+                    <button type="button" id="delete-room-confirm-btn" class="button danger-button modal-delete-button">Otağı Sil</button>
+                </div>
                 <p id="edit-room-message" class="message"></p>
             </div>
         </div>
     </div>
+
     <div id="dice-roll-modal" class="modal dice-modal">
          <div class="modal-content">
             <div class="modal-body">
                 <div class="instructions" id="dice-instructions">Rəqib gözlənilir...</div>
-                <div class="table-surface"> <div class="scene" id="dice-scene"> <div class="cube" id="dice-cube"> <div class="cube__face cube__face--front cube__face--1"><span class="dot"></span></div> <div class="cube__face cube__face--back cube__face--6"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> <div class="cube__face cube__face--right cube__face--3"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> <div class="cube__face cube__face--left cube__face--4"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> <div class="cube__face cube__face--top cube__face--2"><span class="dot"></span><span class="dot"></span></div> <div class="cube__face cube__face--bottom cube__face--5"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div> </div> </div> </div>
-                <div class="dice-results-area"> <div class="result-box" id="your-roll-box"> <span class="label">Sizin Zər</span> <span class="value" id="your-roll-result">?</span> </div> <div class="result-box" id="opponent-roll-box"> <span class="label">Rəqibin Zəri</span> <span class="value" id="opponent-roll-result">?</span> </div> </div>
+                <div class="table-surface">
+                    <div class="scene" id="dice-scene">
+                        <div class="cube" id="dice-cube">
+                             <div class="cube__face cube__face--front cube__face--1"><span class="dot"></span></div>
+                              <div class="cube__face cube__face--back cube__face--6"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                              <div class="cube__face cube__face--right cube__face--3"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                              <div class="cube__face cube__face--left cube__face--4"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                              <div class="cube__face cube__face--top cube__face--2"><span class="dot"></span><span class="dot"></span></div>
+                              <div class="cube__face cube__face--bottom cube__face--5"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="dice-results-area">
+                    <div class="result-box" id="your-roll-box">
+                        <span class="label">Sizin Zər</span>
+                        <span class="value" id="your-roll-result">?</span>
+                    </div>
+                    <div class="result-box" id="opponent-roll-box">
+                        <span class="label">Rəqibin Zəri</span>
+                        <span class="value" id="opponent-roll-result">?</span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
+
     <div id="symbol-select-modal" class="modal symbol-select-modal">
           <div class="modal-content">
-             <h3 id="symbol-select-title">Simvol Seçin</h3> <p id="symbol-select-message">Oyuna başlamaq üçün simvolunuzu seçin:</p> <div class="symbol-options"> <button class="symbol-button symbol-x" data-symbol="X">X</button> <button class="symbol-button symbol-o" data-symbol="O">O</button> </div> <p id="symbol-waiting-message" class="waiting-message" style="display: none;">Rəqib simvol seçir...</p>
+             <h3 id="symbol-select-title">Simvol Seçin</h3>
+             <p id="symbol-select-message">Oyuna başlamaq üçün simvolunuzu seçin:</p>
+             <div class="symbol-options">
+                 <button class="symbol-button symbol-x" data-symbol="X">X</button>
+                 <button class="symbol-button symbol-o" data-symbol="O">O</button>
+             </div>
+             <p id="symbol-waiting-message" class="waiting-message" style="display: none;">Rəqib simvol seçir...</p>
          </div>
      </div>
 

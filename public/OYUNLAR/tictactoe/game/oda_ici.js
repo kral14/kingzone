@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => { // async etdik
         if (!response.ok || !data.loggedIn) {
             console.log("oda_ici.js: Giriş edilməyib (check-auth), login səhifəsinə yönləndirilir...");
             // Yolun düzgün olduğundan əmin olun (oda_ici.html-dən login.html-ə)
-            window.location.href = '../../ANA SEHIFE/login/login.html';
+            window.location.href = '/ANA SEHIFE/login/login.html'; // Başdakı ../../ silindi, / əlavə edildi
             return; // Scriptin qalanı işləməsin
         }
         // Giriş edilib, istifadəçi məlumatları data.user obyektindədir

@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => { // async burdan silinir, s
 
             if (!response.ok || !data.loggedIn) {
                 console.log("Oyunlar JS: Giriş edilməyib (check-auth), login səhifəsinə yönləndirilir...");
-                window.location.href = '../../ANA SEHIFE/login/login.html';
+                window.location.href = '/ANA SEHIFE/login/login.html'; // Başdakı ../../ silindi, / əlavə edildi
                 return;
             }
 

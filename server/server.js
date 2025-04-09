@@ -924,7 +924,7 @@ io.on('connection', (socket) => {
     // handleDisconnectOrLeave funksiyasının sonu (Part 4-dən davam)
   } // handleDisconnectOrLeave sonu
 
-}); // <--- io.on('connection', ...) blokunun bağlanması BURADADIR!
+); // <--- io.on('connection', ...) blokunun bağlanması BURADADIR!
 
 console.log('[Setup] Socket.IO \'connection\' dinləyicisi təyin edildi.');
 

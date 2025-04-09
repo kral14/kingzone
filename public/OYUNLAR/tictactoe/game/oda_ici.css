@@ -1,5 +1,13 @@
-/* oda_ici.css - Oyun Ekranı Stilleri v13 (Desktop Mərkəzləmə Düzəlişi) */
-/* Version 007 - 06.04.2025 00:38:24 (Bu versiya nömrəsi sizin kodunuzdan gəlir) */
+/* ======================================================================== */
+/* oda_ici.css - Oyun Ekranı Stilleri (Yenidən Baxılır)                     */
+/* ======================================================================== */
+/* Qeyd: Bu fayl oyun otağının görünüşünü təyin edir. JS dəyişiklikləri    */
+/* və responsivlik problemləri nəzərə alınaraq yenidən təqdim edilir.      */
+/* ======================================================================== */
+
+/* ------------------------------------------------------------------------ */
+/* --- Part 1/4: Root Dəyişənləri, Qlobal Stiller, Konteyner, Başlıq --- */
+/* ------------------------------------------------------------------------ */
 
 :root {
   /* Rənglər */
@@ -21,13 +29,16 @@
   --active-player-bg: rgba(74, 144, 226, 0.2);
   --winning-cell-bg: rgba(57, 255, 20, 0.3);
 
-  /* Lövhə Ölçüləri (JS tərəfindən təyin olunacaq) */
-  --board-size: 3; /* Default */
-  /* Hüceyrə Ölçüləri (clamp ilə daha adaptiv) - BUNLARI YENİDƏN BAXMAQ LAZIM OLA BİLƏR */
-  --cell-size-large-dynamic: clamp(55px, 22vw, 110px); /* 3x3 üçün */
-  --cell-size-medium-dynamic: clamp(50px, 19vw, 100px); /* 4x4 üçün */
-  --cell-size-small-dynamic: clamp(45px, 16vw, 80px); /* 5x5, 6x6 üçün - BƏLKƏ DAHA KİÇİK OLMALIDIR? */
-  /* Hazırki ölçü JS ilə təyin olunacaq */
+  /* Lövhə Ölçüləri (JS tərəfindən `--board-size` və `--current-cell-size` təyin olunur) */
+  --board-size: 3; /* Default (JS bunu dəyişəcək) */
+  /* Hüceyrə Ölçüləri (clamp ilə) - RESPONSİVLİK ÜÇÜN BU DƏYƏRLƏR ƏSASDIR! */
+  /* 3x3 üçün */
+  --cell-size-large-dynamic: clamp(60px, 22vw, 120px); 
+  /* 4x4 üçün */
+  --cell-size-medium-dynamic: clamp(55px, 19vw, 100px); 
+  /* 5x5, 6x6 üçün - Mobil üçün minimum dəyəri azaltmaq lazım ola bilər */
+  --cell-size-small-dynamic: clamp(40px, 16vw, 80px); /* <<< Mobil üçün min 40px çox ola bilər? */
+  /* Hazırkı ölçü JS ilə təyin olunur */
   --current-cell-size: var(--cell-size-large-dynamic);
   --current-font-size: calc(var(--current-cell-size) * 0.6);
 
@@ -39,74 +50,79 @@
   --shatter-duration: 3s;
   --shatter-distance: 170px;
   --shatter-font-size: 3rem;
-  --shatter-font-size-small: 1.8rem;
+  --shatter-font-size-small: 1.8rem; /* Mobil üçün */
 }
 
+/* Qlobal Sıfırlama */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+/* Body Stili */
 body {
   font-family: "Nunito", sans-serif;
   background: linear-gradient(to bottom, var(--board-bg), var(--background-color));
   color: var(--text-color);
-  min-height: 100vh;
-  position: relative; /* Effektlər üçün lazım ola bilər */
-  padding: 10px; /* Ümumi kənar boşluq */
-  overflow-x: hidden; /* Üfüqi scroll-u əngəllə (əgər lövhə sığmasa, bu problem yarada bilər) */
+  min-height: 100vh; /* Ən azı ekran hündürlüyü qədər */
+  position: relative; /* Overlaylar üçün */
+  padding: 10px; /* Kənarlardan boşluq */
+  overflow-x: hidden; /* Üfüqi scrollu gizlət (böyük lövhələr sığmayanda problem yaradır!) */
 }
 
 /* Əsas Oyun Konteyneri */
 .game-container {
   width: 100%;
-  max-width: 750px; /* Geniş ekranlarda max en - BÖYÜK LÖVHƏLƏR ÜÇÜN ARTIRMAQ LAZIM OLA BİLƏR */
+  /* Böyük lövhələr üçün bu max-width-i artırmaq və ya qaldırmaq lazım gələ bilər */
+  max-width: 750px; /* <<< 6x6 lövhə üçün bəlkə 850px? */
   background-color: rgba(40, 40, 78, 0.9);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px); /* Arxa fonu bulanıqlaşdırma (performansa təsir edə bilər) */
   border-radius: 12px;
   box-shadow: 0 10px 35px rgba(0, 0, 0, 0.4);
   border: 1px solid var(--border-color);
-  padding: clamp(15px, 3vw, 30px); /* Adaptiv daxili boşluq */
+  padding: clamp(15px, 3vw, 30px); /* İç boşluq (ekran ölçüsünə görə dəyişir) */
   display: flex;
-  flex-direction: column;
-  gap: clamp(15px, 2vw, 20px); /* Elementlər arası adaptiv boşluq */
-  position: relative; /* Z-index üçün */
-  z-index: 1;
-  margin: 20px auto; /* Mərkəzləmə */
+  flex-direction: column; /* Elementləri alt-alta düz */
+  gap: clamp(15px, 2vw, 20px); /* Elementlər arası boşluq */
+  position: relative;
+  z-index: 1; /* Yükləmə ekranından arxada qalsın */
+  margin: 20px auto; /* Səhifədə mərkəzləmə */
   opacity: 1;
-  transition: opacity 0.5s ease-in-out;
+  transition: opacity 0.5s ease-in-out; /* Görünüş/gizlənmə effekti */
 }
 
-/* Başlıq */
+/* Oyun Başlığı (Header) */
 .game-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 15px;
-  gap: 10px; /* Düymələr və başlıq arası boşluq */
-  flex-wrap: wrap; /* Kiçik ekranlarda düymələri alta atsın */
+  justify-content: space-between; /* Başlıq solda, düymələr sağda */
+  align-items: center; /* Vertikal mərkəzləmə */
+  border-bottom: 1px solid var(--border-color); /* Alt xətt */
+  padding-bottom: 15px; /* Alt xəttdən boşluq */
+  gap: 10px; /* Başlıq və düymələr arası */
+  flex-wrap: wrap; /* Kiçik ekranlarda düymələr alta düşsün */
 }
 
+/* Otaq Adı (H1) */
 .game-header h1 {
   margin: 0;
-  font-size: clamp(1.2rem, 4vw, 1.5rem); /* Adaptiv şrift ölçüsü */
+  font-size: clamp(1.2rem, 4vw, 1.5rem); /* Ölçüyə görə dəyişən şrift */
   font-weight: 700;
   font-family: "Orbitron", sans-serif;
   color: #fff;
-  text-shadow: 0 0 6px var(--primary-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis; /* Uzun otaq adları üçün */
-  flex-grow: 1; /* Boş yeri tutsun */
+  text-shadow: 0 0 6px var(--primary-color); /* Neon effekt */
+  white-space: nowrap; /* Tək sətirdə saxlama */
+  overflow: hidden; /* Kənara çıxanı gizlət */
+  text-overflow: ellipsis; /* Uzun adlar üçün ... göstər */
+  flex-grow: 1; /* Mümkün olan boş yeri tut */
 }
 
+/* Başlıqdakı Düymələr Konteyneri */
 .header-buttons {
   display: flex;
   align-items: center;
-  gap: 8px; /* Düymələr arası boşluq */
-  flex-shrink: 0; /* Sıxışmasın */
+  gap: 8px; /* Düymələr arası */
+  flex-shrink: 0; /* Sıxışdırılmasın */
 }
 
 /* Ümumi Düymə Stili */
@@ -122,101 +138,165 @@ body {
   transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
   white-space: nowrap;
-  display: inline-flex; /* İkon və mətni yanaşı qoymaq üçün */
+  display: inline-flex; /* İkonla mətn üçün */
   align-items: center;
   justify-content: center;
-  gap: 6px; /* İkon və mətn arası */
+  gap: 6px; /* İkonla mətn arası */
 }
-.button:hover { transform: translateY(-2px) scale(1.03); }
-.button:active { transform: translateY(0) scale(1); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); }
-.button:disabled { background-color: #aaa; color: #555; cursor: not-allowed; transform: none; box-shadow: none; opacity: 0.7; }
-.button.icon-button { padding: 8px 10px; font-size: 1rem; /* İkonlu düymələr üçün */ }
+.button:hover:not(:disabled) { /* Hover effekti (deaktiv olmayanlara) */
+  transform: translateY(-2px) scale(1.03); 
+  /* Parlaqlıq effekti əlavə oluna bilər */
+}
+.button:active:not(:disabled) { /* Klikləmə effekti */
+  transform: translateY(0) scale(1); 
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); 
+}
+.button:disabled { /* Deaktiv düymə */
+  background-color: #aaa !important; /* Rəngi override et */
+  background-image: none !important; /* Gradienti ləğv et */
+  color: #555 !important;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  opacity: 0.7;
+}
+/* İkonlu Düymələr (Daha kompakt) */
+.button.icon-button { 
+  padding: 8px 10px; 
+  font-size: 1rem; 
+}
+.button i.fas { /* FontAwesome ikonları üçün */
+  /* margin-right: 6px; */ /* Gap onsuz da var */
+  line-height: 1; /* İkonun düzgün dayanması üçün */
+}
 
-/* Xüsusi Düymə Rəngləri */
-.button.danger-button { background: linear-gradient(45deg, #c82333, var(--danger-color)); color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,0.3); }
-.button.danger-button:hover:not(:disabled) { background: linear-gradient(45deg, #bd2130, #e04343); box-shadow: 0 5px 10px rgba(0,0,0,0.3), 0 0 10px rgba(255,77,77,0.5); }
-/* Bu ikon düyməsi hansı idi? Edit? Rəngini dəyişək */
-.button.icon-button#edit-room-btn { background: linear-gradient(45deg, var(--secondary-color), #5a6268); color: #fff; } 
-.button.icon-button#edit-room-btn:hover:not(:disabled) { background: linear-gradient(45deg, #5a6268, #4e555b); box-shadow: 0 5px 10px rgba(0,0,0,0.3), 0 0 8px rgba(200,200,200,0.4); }
+/* Xüsusi Düymə Rəngləri və Hover Effektləri */
+.button.danger-button { /* Otaqdan Ayrıl, Kick, Remove SNOW */
+  background: linear-gradient(45deg, #c82333, var(--danger-color)); 
+  color: #fff; 
+  text-shadow: 0 1px 1px rgba(0,0,0,0.3); 
+}
+.button.danger-button:hover:not(:disabled) { 
+  background: linear-gradient(45deg, #bd2130, #e04343); 
+  box-shadow: 0 5px 10px rgba(0,0,0,0.3), 0 0 10px rgba(255,77,77,0.5); 
+}
 
-.button.primary-button { background: linear-gradient(45deg, #3a7bd5, var(--primary-color)); color: #fff; } /* SNOW'u Çağır */
-.button.primary-button:hover:not(:disabled) { background: linear-gradient(45deg, #3a70c0, #4a9ff0); box-shadow: 0 5px 10px rgba(0,0,0,0.3), 0 0 10px rgba(74,144,226,0.5); }
+/* Edit düyməsi üçün fərqli rəng */
+.button.icon-button#edit-room-btn { 
+  background: linear-gradient(45deg, var(--secondary-color), #5a6268); 
+  color: #fff; 
+} 
+.button.icon-button#edit-room-btn:hover:not(:disabled) { 
+  background: linear-gradient(45deg, #5a6268, #4e555b); 
+  box-shadow: 0 5px 10px rgba(0,0,0,0.3), 0 0 8px rgba(200,200,200,0.4); 
+}
 
-.button.secondary-button { background: linear-gradient(45deg, var(--secondary-color), #a5aab0); color: #fff; } /* Restart */
-.button.secondary-button:hover:not(:disabled) { background: linear-gradient(45deg, #5a6268, #4e555b); box-shadow: 0 5px 10px rgba(0,0,0,0.3), 0 0 8px rgba(200,200,200,0.4); }
-.button.secondary-button i { margin-right: 8px; } /* Restart ikonası üçün */
+.button.primary-button { /* SNOW'u Çağır */
+  background: linear-gradient(45deg, #3a7bd5, var(--primary-color)); 
+  color: #fff; 
+}
+.button.primary-button:hover:not(:disabled) { 
+  background: linear-gradient(45deg, #3a70c0, #4a9ff0); 
+  box-shadow: 0 5px 10px rgba(0,0,0,0.3), 0 0 10px rgba(74,144,226,0.5); 
+}
 
+.button.secondary-button { /* Restart */
+  background: linear-gradient(45deg, var(--secondary-color), #a5aab0); 
+  color: #fff; 
+}
+.button.secondary-button:hover:not(:disabled) { 
+  background: linear-gradient(45deg, #5a6268, #4e555b); 
+  box-shadow: 0 5px 10px rgba(0,0,0,0.3), 0 0 8px rgba(200,200,200,0.4); 
+}
+/* Restart ikonası üçün (əgər varsa) */
+/* .button.secondary-button i { margin-right: 8px; } */
+
+
+/* ------------------------------------------------------------------------ */
 /* --- Hissə 1/4 Sonu --- */
-/* oda_ici.css - Hissə 2/4 */
+/* ------------------------------------------------------------------------ */
+/* ======================================================================== */
+/* oda_ici.css - Oyun Ekranı Stilleri (Yenidən Baxılır)                     */
+/* ======================================================================== */
+
+/* ... (Hissə 1-dən kodlar buradadır) ... */
+
+/* ------------------------------------------------------------------------ */
+/* --- Part 2/4: Oyun Paneli, Lövhə, Hüceyrələr, Status, Footer --- */
+/* ------------------------------------------------------------------------ */
 
 /* Oyun Məlumatı Sahəsi */
 .game-info {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background-color: rgba(0, 0, 0, 0.25);
-  padding: 10px clamp(10px, 3vw, 18px);
+  justify-content: space-between; /* Elementləri kənarlara sıxışdır */
+  align-items: center; /* Vertikal mərkəzləmə */
+  background-color: rgba(0, 0, 0, 0.25); /* Yarı-şəffaf qara fon */
+  padding: 10px clamp(10px, 3vw, 18px); /* İç boşluq */
   border-radius: 8px;
-  border: 1px solid rgba(74, 74, 142, 0.5);
-  gap: 10px;
-  flex-wrap: wrap; /* Kiçik ekranlar üçün */
+  border: 1px solid rgba(74, 74, 142, 0.5); /* Solğun sərhəd */
+  gap: 10px; /* Elementlər arası boşluq */
+  flex-wrap: wrap; /* Kiçik ekranlarda sıra indikatoru alta düşsün */
 }
+
+/* Oyunçu Məlumat Bloku */
 .player-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 10px; /* Simvol və ad arası */
   padding: 5px 10px;
   border-radius: 6px;
-  transition: background-color 0.3s ease, box-shadow 0.3s ease;
-  flex-basis: calc(40% - 10px); /* Təxmini bərabər bölüşdürmə */
-  flex-grow: 1;
-  justify-content: center; /* Mərkəzə çəkmək */
-  min-width: 130px; /* Minimum en */
+  transition: background-color 0.3s ease, box-shadow 0.3s ease; /* Yumşaq keçid */
+  flex-basis: calc(40% - 10px); /* Təxminən 40% en (boşluqları çıxmaqla) */
+  flex-grow: 1; /* Qalan boşluğu doldur */
+  justify-content: center; /* Məzmunu mərkəzləşdir */
+  min-width: 130px; /* Minimum en (sıxışmanın qarşısını alır) */
 }
-.player-info.active-player { 
-  background-color: var(--active-player-bg); 
-  box-shadow: 0 0 10px var(--primary-color); 
+
+/* Aktiv Oyunçu Vurgusu */
+.player-info.active-player {
+  background-color: var(--active-player-bg);
+  box-shadow: 0 0 10px var(--primary-color); /* Parlaqlıq effekti */
 }
-.player-symbol { 
-  font-size: clamp(1.3rem, 4vw, 1.6rem); 
-  font-weight: 700; 
-  font-family: "Orbitron", sans-serif; 
-  line-height: 1; 
+
+/* Oyunçu Simvolu (X, O) */
+.player-symbol {
+  font-size: clamp(1.3rem, 4vw, 1.6rem); /* Adaptiv ölçü */
+  font-weight: 700;
+  font-family: "Orbitron", sans-serif;
+  line-height: 1; /* Sətir hündürlüyünü normallaşdır */
+  /* Rənglər .player-x, .player-o klasları ilə təyin olunur */
 }
-.player-name { 
-  font-weight: 700; 
-  font-size: clamp(0.85rem, 2.8vw, 1.05rem); 
-  animation: rainbow-text-glow-subtle 6s linear infinite; /* Əvvəlki koddakı kimi */
-  white-space: nowrap; 
-  overflow: hidden; 
-  text-overflow: ellipsis; 
+.player-info.player-x .player-symbol { color: var(--player-x-color); }
+.player-info.player-o .player-symbol { color: var(--player-o-color); }
+
+/* Oyunçu Adı */
+.player-name {
+  font-weight: 700;
+  font-size: clamp(0.85rem, 2.8vw, 1.05rem); /* Adaptiv ölçü */
+  animation: rainbow-text-glow-subtle 6s linear infinite; /* Rəng keçidi animasiyası */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis; /* Uzun adlar üçün ... */
 }
+
+/* Sıra Göstəricisi (Ortada/Yuxarıda) */
 .turn-indicator {
-  font-size: clamp(1rem, 3.5vw, 1.2rem);
+  font-size: clamp(1rem, 3.5vw, 1.2rem); /* Adaptiv ölçü */
   font-weight: 700;
   color: #fff;
   padding: 5px 15px;
-  background-color: rgba(0, 0, 0, 0.3);
+  background-color: rgba(0, 0, 0, 0.3); /* Yarı-şəffaf fon */
   border-radius: 5px;
   text-align: center;
-  /* Kiçik ekranlarda ortada və yuxarıda olması üçün */
-  flex-basis: 100%; 
-  order: -1; /* flex elementləri arasında ən üstdə görünsün */
-  margin-bottom: 5px;
+  flex-basis: 100%; /* Mobil üçün tam en tutur */
+  order: -1; /* Mobil üçün ən üstdə göstərir */
+  margin-bottom: 5px; /* Mobil üçün aşağıdan boşluq */
 }
 
-/* Rainbow Text Animasiyası (əvvəlki koddakı kimi) */
+/* Rainbow Text Animasiyası */
 @keyframes rainbow-text-glow-subtle {
-  0%, 100% { color: hsl(0, 90%, 70%); text-shadow: 0 0 2px hsla(0, 90%, 65%, 0.6), 0 0 4px hsla(0, 90%, 60%, 0.4); }
-  10% { color: hsl(36, 90%, 70%); text-shadow: 0 0 2px hsla(36, 90%, 65%, 0.6), 0 0 4px hsla(36, 90%, 60%, 0.4); }
-  20% { color: hsl(72, 90%, 70%); text-shadow: 0 0 2px hsla(72, 90%, 65%, 0.6), 0 0 4px hsla(72, 90%, 60%, 0.4); }
-  30% { color: hsl(108, 90%, 70%); text-shadow: 0 0 2px hsla(108, 90%, 65%, 0.6), 0 0 4px hsla(108, 90%, 60%, 0.4); }
-  40% { color: hsl(144, 90%, 70%); text-shadow: 0 0 2px hsla(144, 90%, 65%, 0.6), 0 0 4px hsla(144, 90%, 60%, 0.4); }
-  50% { color: hsl(180, 90%, 70%); text-shadow: 0 0 2px hsla(180, 90%, 65%, 0.6), 0 0 4px hsla(180, 90%, 60%, 0.4); }
-  60% { color: hsl(216, 90%, 70%); text-shadow: 0 0 2px hsla(216, 90%, 65%, 0.6), 0 0 4px hsla(216, 90%, 60%, 0.4); }
-  70% { color: hsl(252, 90%, 70%); text-shadow: 0 0 2px hsla(252, 90%, 65%, 0.6), 0 0 4px hsla(252, 90%, 60%, 0.4); }
-  80% { color: hsl(288, 90%, 70%); text-shadow: 0 0 2px hsla(288, 90%, 65%, 0.6), 0 0 4px hsla(288, 90%, 60%, 0.4); }
-  90% { color: hsl(324, 90%, 70%); text-shadow: 0 0 2px hsla(324, 90%, 65%, 0.6), 0 0 4px hsla(324, 90%, 60%, 0.4); }
+  /* ... (Animasiya kodları əvvəlki kimi) ... */
+  0%, 100% { color: hsl(0, 90%, 70%); text-shadow: 0 0 2px hsla(0, 90%, 65%, 0.6), 0 0 4px hsla(0, 90%, 60%, 0.4); } 10% { color: hsl(36, 90%, 70%); text-shadow: 0 0 2px hsla(36, 90%, 65%, 0.6), 0 0 4px hsla(36, 90%, 60%, 0.4); } 20% { color: hsl(72, 90%, 70%); text-shadow: 0 0 2px hsla(72, 90%, 65%, 0.6), 0 0 4px hsla(72, 90%, 60%, 0.4); } 30% { color: hsl(108, 90%, 70%); text-shadow: 0 0 2px hsla(108, 90%, 65%, 0.6), 0 0 4px hsla(108, 90%, 60%, 0.4); } 40% { color: hsl(144, 90%, 70%); text-shadow: 0 0 2px hsla(144, 90%, 65%, 0.6), 0 0 4px hsla(144, 90%, 60%, 0.4); } 50% { color: hsl(180, 90%, 70%); text-shadow: 0 0 2px hsla(180, 90%, 65%, 0.6), 0 0 4px hsla(180, 90%, 60%, 0.4); } 60% { color: hsl(216, 90%, 70%); text-shadow: 0 0 2px hsla(216, 90%, 65%, 0.6), 0 0 4px hsla(216, 90%, 60%, 0.4); } 70% { color: hsl(252, 90%, 70%); text-shadow: 0 0 2px hsla(252, 90%, 65%, 0.6), 0 0 4px hsla(252, 90%, 60%, 0.4); } 80% { color: hsl(288, 90%, 70%); text-shadow: 0 0 2px hsla(288, 90%, 65%, 0.6), 0 0 4px hsla(288, 90%, 60%, 0.4); } 90% { color: hsl(324, 90%, 70%); text-shadow: 0 0 2px hsla(324, 90%, 65%, 0.6), 0 0 4px hsla(324, 90%, 60%, 0.4); }
 }
 
 /* Oyun Lövhəsi Konteyneri */
@@ -224,337 +304,339 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 15px; /* Lövhə, status və düymə arası boşluq */
-  margin: 15px 0; /* Üst və alt boşluq */
+  gap: 15px;
+  margin: 15px 0;
   width: 100%;
 }
 
 /* Oyun Lövhəsi (Grid) */
 .game-board {
   display: grid;
-  /* Sütun və sətir sayı JS-dən gələn --board-size ilə təyin olunur */
   grid-template-columns: repeat(var(--board-size, 3), var(--current-cell-size));
   grid-template-rows: repeat(var(--board-size, 3), var(--current-cell-size));
-  gap: clamp(4px, 1vw, 8px); /* Hüceyrələr arası adaptiv boşluq */
+  gap: clamp(4px, 1vw, 8px);
   background-color: var(--board-bg);
-  padding: clamp(8px, 2vw, 15px); /* Lövhə kənarı adaptiv boşluq */
+  padding: clamp(8px, 2vw, 15px);
   border-radius: 10px;
   border: 2px solid var(--border-color);
   box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.5);
-  width: fit-content; /* İçindəki elementlərə görə en təyin etsin */
-  max-width: 100%; /* Ekrandan kənara çıxmasın */
-  margin-left: auto;  /* Konteyner içində mərkəzləmək üçün */
-  margin-right: auto; /* Konteyner içində mərkəzləmək üçün */
-  /* --- DİQQƏT: Böyük lövhələrdə (5x5, 6x6) bu "fit-content" və mərkəzləmə problemi yarada bilər --- */
-  /* --- Mobil responsivlik üçün əlavə stillər lazım olacaq --- */
+  width: fit-content; /* <<< BU BÖYÜK LÖVHƏ PROBLEMİNİN MƏNBƏYİ OLA BİLƏR >>> */
+  /* Bəlkə bunun əvəzinə JS ilə hesablanmış bir width təyin etmək daha yaxşıdır? */
+  /* Və ya sadəcə max-width: 100% qalsın? */
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* Lövhə Hüceyrəsi */
 .cell {
   background-color: var(--card-background);
   border: 1px solid var(--cell-border);
-  border-radius: clamp(4px, 1.5vw, 8px); /* Adaptiv künc radiusu */
+  border-radius: clamp(4px, 1.5vw, 8px);
   display: flex;
   justify-content: center;
   align-items: center;
   font-weight: bold;
   font-family: "Orbitron", sans-serif;
-  cursor: pointer; /* Başlanğıcda pointer olsun, JS sonra dəyişəcək */
+  cursor: pointer;
   transition: background-color 0.2s ease, transform 0.1s ease;
-  position: relative; /* Qazanma animasiyası üçün */
+  position: relative;
   color: var(--text-color);
-  width: var(--current-cell-size); /* JS-dən gələn ölçü */
-  height: var(--current-cell-size); /* JS-dən gələn ölçü */
-  font-size: var(--current-font-size); /* JS-dən gələn ölçü */
-  -webkit-tap-highlight-color: transparent; /* Mobil klik parıltısını ləğv et */
+  width: var(--current-cell-size); /* <<< BU DƏYƏRLƏR DƏ YENİDƏN BAXILMALIDIR >>> */
+  height: var(--current-cell-size);/* <<< MOBİL ÜÇÜN DAHA KİÇİK OLMALIDIR >>> */
+  font-size: var(--current-font-size);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none; /* Mətni seçməyi əngəllə */
 }
 
-/* Hover effekti (yalnız toxunma olmayan cihazlar üçün) */
+/* Hover effekti */
 @media (hover: hover) {
-  .cell:hover:not(.X):not(.O) { /* Yalnız boş hüceyrələrə hover */
-     background-color: var(--cell-hover-bg); 
-     transform: scale(1.03); 
+  .cell:hover:not(.X):not(.O) { /* Yalnız boş və kliklənə bilən hüceyrələrə hover */
+     /* JS tərəfi style.cursor = 'pointer' etdikdə buna ehtiyac var? */
+     background-color: var(--cell-hover-bg);
+     transform: scale(1.03);
+  }
+  /* Əgər cursor 'not-allowed' isə hover effekti olmasın */
+  .cell[style*="cursor: not-allowed"]:hover {
+      background-color: var(--card-background); /* Hover rəngini ləğv et */
+      transform: none; /* Böyüməni ləğv et */
   }
 }
 
 /* Dolu hüceyrələr */
-.cell.X, .cell.O { 
-  cursor: not-allowed; 
-  transform: scale(1); /* Hover effektini ləğv et */
+.cell.X, .cell.O {
+  cursor: not-allowed;
+  transform: scale(1);
 }
-.cell.X { 
-  color: var(--player-x-color); 
-  animation: glow-x-subtle 2.5s ease-in-out infinite alternate; 
-}
-.cell.O { 
-  color: var(--player-o-color); 
-  animation: glow-o-subtle 2.5s ease-in-out infinite alternate; 
-}
+.cell.X { color: var(--player-x-color); animation: glow-x-subtle 2.5s ease-in-out infinite alternate; }
+.cell.O { color: var(--player-o-color); animation: glow-o-subtle 2.5s ease-in-out infinite alternate; }
 
 /* Simvol Parıltı Animasiyaları */
-@keyframes glow-x-subtle {
-  0%, 100% { text-shadow: 0 0 3px var(--player-x-color), 0 0 6px rgba(0, 255, 255, 0.5); transform: scale(1); }
-  50% { text-shadow: 0 0 6px var(--player-x-color), 0 0 12px rgba(0, 255, 255, 0.7); transform: scale(1.05); }
-}
-@keyframes glow-o-subtle {
-  0%, 100% { text-shadow: 0 0 3px var(--player-o-color), 0 0 6px rgba(255, 0, 255, 0.5); transform: scale(1); }
-  50% { text-shadow: 0 0 6px var(--player-o-color), 0 0 12px rgba(255, 0, 255, 0.7); transform: scale(1.05); }
-}
+@keyframes glow-x-subtle { /* ... (əvvəlki kimi) ... */ 0%, 100% { text-shadow: 0 0 3px var(--player-x-color), 0 0 6px rgba(0, 255, 255, 0.5); transform: scale(1); } 50% { text-shadow: 0 0 6px var(--player-x-color), 0 0 12px rgba(0, 255, 255, 0.7); transform: scale(1.05); } }
+@keyframes glow-o-subtle { /* ... (əvvəlki kimi) ... */ 0%, 100% { text-shadow: 0 0 3px var(--player-o-color), 0 0 6px rgba(255, 0, 255, 0.5); transform: scale(1); } 50% { text-shadow: 0 0 6px var(--player-o-color), 0 0 12px rgba(255, 0, 255, 0.7); transform: scale(1.05); } }
 
 /* Qazanan hüceyrə */
-.cell.winning { 
-  background-color: var(--winning-cell-bg); 
-  animation: pulse 0.6s infinite alternate ease-in-out; 
+.cell.winning {
+  background-color: var(--winning-cell-bg);
+  animation: pulse 0.6s infinite alternate ease-in-out;
 }
-@keyframes pulse { 
-  from { box-shadow: 0 0 4px var(--success-color); } 
-  to { box-shadow: 0 0 18px var(--success-color); } 
-}
+@keyframes pulse { from { box-shadow: 0 0 4px var(--success-color); } to { box-shadow: 0 0 18px var(--success-color); } }
 
 /* Oyun Statusu Mesajı (Lövhənin altında) */
 .game-status {
-  min-height: 1.5em; /* İçərik dəyişəndə sıçramanı azaltmaq üçün */
+  min-height: 1.5em;
   font-size: clamp(1rem, 3.8vw, 1.3rem);
   font-weight: 700;
   color: #fff;
   text-align: center;
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
-  margin-top: 5px; /* Lövhədən sonra kiçik boşluq */
+  margin-top: 5px;
   transition: color 0.3s ease;
 }
 .game-status.win { color: var(--success-color); animation: statusPulse 1s ease-in-out; }
 .game-status.draw { color: var(--warning-color); animation: statusPulse 1s ease-in-out; }
-@keyframes statusPulse { 
-  0%, 100% { transform: scale(1); opacity: 1; } 
-  50% { transform: scale(1.05); opacity: 0.8; } 
-}
+@keyframes statusPulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.05); opacity: 0.8; } }
 
 /* Yenidən Başlat Düyməsi Konteyneri */
-.game-actions { 
-  margin-top: 10px; /* Statusdan sonra boşluq */
-  width: 100%; 
-  display: flex; 
-  justify-content: center; 
+.game-actions {
+  margin-top: 10px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
+/* Restart düyməsinin özü üçün .button.secondary-button stili Part 1-də təyin olunmuşdu */
 
 /* Footer */
-footer { 
-  text-align: center; 
-  margin-top: 20px; 
-  color: var(--subtle-text); 
-  font-size: 0.85rem; 
+footer {
+  text-align: center;
+  margin-top: 20px;
+  color: var(--subtle-text);
+  font-size: 0.85rem;
 }
 
 /* --- Hissə 2/4 Sonu --- */
-/* oda_ici.css - Hissə 3/4 */
+/* ======================================================================== */
+/* oda_ici.css - Oyun Ekranı Stilleri (Yenidən Baxılır)                     */
+/* ======================================================================== */
 
-/* Effektlər Overlay */
-#fireworks-overlay { 
-  position: fixed; 
-  top: 0; 
-  left: 0; 
-  width: 100%; 
-  height: 100%; 
+/* ... (Hissə 1 və 2-dən kodlar buradadır) ... */
+
+/* ------------------------------------------------------------------------ */
+/* --- Part 3/4: Effektlər və Modal Pəncərə Stilleri --- */
+/* ------------------------------------------------------------------------ */
+
+/* Effektlər Overlay (Fişənglər və Mətn) */
+#fireworks-overlay {
+  position: fixed; /* Səhifədə sabit mövqe */
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   display: none; /* Başlanğıcda gizli */
-  justify-content: center; 
-  align-items: center; 
-  z-index: 1000; 
+  justify-content: center;
+  align-items: center;
+  z-index: 1000; /* Oyun elementlərindən üstdə */
   pointer-events: none; /* Klikləri arxaya ötürsün */
-  overflow: hidden; /* Parçalanma effektinin kənara çıxmasını əngəllə */
+  overflow: hidden;
 }
-#fireworks-overlay.visible { display: flex; } /* JS ilə göstəriləcək */
+#fireworks-overlay.visible { display: flex; } /* JS ilə görünür edilir */
 
 /* Parçalanan Mətn Konteyneri */
-#shattering-text-container { 
-  position: relative; 
-  display: flex; 
-  justify-content: center; 
-  align-items: center; 
-  z-index: 1001; 
-  min-height: 50px; /* Minimum hündürlük */
-  perspective: 600px; /* 3D effekt üçün */
-  opacity: 0; /* Başlanğıcda görünməz */
-  transition: opacity 0.3s ease-out; 
+#shattering-text-container {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1001; /* Overlaydan da üstdə */
+  min-height: 50px;
+  perspective: 600px; /* 3D effekt üçün perspektiv */
+  opacity: 0; /* Başlanğıcda gizli */
+  transition: opacity 0.3s ease-out;
 }
-#fireworks-overlay.visible #shattering-text-container { opacity: 1; } /* Overlay görünəndə mətn də görünsün */
+#fireworks-overlay.visible #shattering-text-container { opacity: 1; } /* Görünəndə effekti işə sal */
 
 /* Parçalanan Hərflər */
-.shatter-char { 
-  display: inline-block; 
-  position: relative; /* Animasiya üçün absolute olacaq */
-  font-size: var(--shatter-font-size); 
-  font-weight: bold; 
-  font-family: "Orbitron", sans-serif; 
-  color: white; 
-  text-shadow: 0 0 5px #fff, 0 0 10px var(--success-color), 0 0 15px var(--success-color), 0 0 20px var(--success-color); 
-  opacity: 1; 
-  will-change: transform, opacity; /* Performans üçün */
-  padding: 0 2px; /* Hərflər arası kiçik boşluq */
+.shatter-char {
+  display: inline-block;
+  position: relative; /* Animasiyada absolute olacaq */
+  font-size: var(--shatter-font-size); /* Root-dan gələn ölçü */
+  font-weight: bold;
+  font-family: "Orbitron", sans-serif;
+  color: white;
+  text-shadow: 0 0 5px #fff, 0 0 10px var(--success-color), 0 0 15px var(--success-color), 0 0 20px var(--success-color);
+  opacity: 1;
+  will-change: transform, opacity; /* Brauzerə optimizasiya üçün ipucu */
+  padding: 0 2px; /* Hərflər arası */
 }
 
 /* Parçalanma Animasiyası */
 @keyframes shatter {
-  0% { 
-    transform: translate3d(0, 0, 0) rotate(0deg) scale(1); 
-    opacity: 1; 
-    color: white; 
-    text-shadow: 0 0 5px #fff, 0 0 10px var(--success-color), 0 0 15px var(--success-color), 0 0 20px var(--success-color); 
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    opacity: 1;
+    color: white;
+    text-shadow: 0 0 5px #fff, 0 0 10px var(--success-color), 0 0 15px var(--success-color), 0 0 20px var(--success-color);
   }
-  5% { /* Partlama anı */
-    transform: translate3d(0, 0, 10px) rotate(5deg) scale(1.2); 
-    opacity: 1; 
-    color: #ffffcc; /* Biraz sarımtıl rəng */
-    text-shadow: 0 0 10px #fff, 0 0 20px #ffffcc, 0 0 30px var(--success-color), 0 0 40px var(--success-color); 
+  5% { /* İlkin partlama effekti */
+    transform: translate3d(0, 0, 10px) rotate(5deg) scale(1.2);
+    opacity: 1;
+    color: #ffffcc;
+    text-shadow: 0 0 10px #fff, 0 0 20px #ffffcc, 0 0 30px var(--success-color), 0 0 40px var(--success-color);
   }
-  100% { /* Dağılma */
-    transform: translate3d(var(--tx, 0px), var(--ty, 0px), var(--tz, -50px)) rotate(var(--rot, 0deg)) scale(0); 
-    opacity: 0; 
+  100% { /* Hərflərin dağılması */
+    /* JS tərəfindən təyin olunan təsadüfi dəyərlər: */
+    transform: translate3d(var(--tx, 0px), var(--ty, 0px), var(--tz, -50px)) rotate(var(--rot, 0deg)) scale(0);
+    opacity: 0;
   }
 }
 
-/* Animasiyanı tətbiq et */
-.shatter-char.animate { 
-  position: absolute; /* Animasiya zamanı mütləq mövqe */
-  animation: shatter var(--shatter-duration) cubic-bezier(0.1, 0.8, 0.2, 1) forwards; 
-  /* Gecikmə JS ilə təyin olunacaq (style.animationDelay) */
+/* Animasiyanı hərflərə tətbiq et (JS ilə .animate klası əlavə olunur) */
+.shatter-char.animate {
+  position: absolute; /* Dağılarkən bir-birinin üstünə minməsin */
+  animation: shatter var(--shatter-duration) cubic-bezier(0.1, 0.8, 0.2, 1) forwards;
+  /* animation-delay JS ilə hər hərf üçün ayrıca təyin olunacaq */
 }
 
-/* --- Modal Pəncərə Stilleri (Otaq Ayarları, Zər, Simvol) --- */
-.modal { 
+/* --- Modal Pəncərə Stilleri (Ümumi) --- */
+.modal {
   display: none; /* Başlanğıcda gizli */
-  position: fixed; 
-  z-index: 1050; /* Oyun lövhəsindən üstdə */
-  left: 0; 
-  top: 0; 
-  width: 100%; 
-  height: 100%; 
-  overflow: auto; /* Ehtiyac olarsa scroll çıxsın */
-  background-color: rgba(10, 10, 20, 0.85); /* Yarı-şəffaf arxa fon */
-  backdrop-filter: blur(5px); /* Arxa fonu bulanıqlaşdır */
+  position: fixed;
+  z-index: 1050; /* Effekt overlayından da üstdə ola bilər */
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto; /* Scroll lazım olarsa */
+  background-color: rgba(10, 10, 20, 0.85);
+  backdrop-filter: blur(5px);
   padding-top: 50px; /* Yuxarıdan boşluq */
-  animation: modalBackdropFadeIn 0.3s ease-out; /* Görünmə animasiyası */
+  animation: modalBackdropFadeIn 0.3s ease-out;
 }
 
 /* Modalın İçindəki Qutu */
-.modal-content { 
-  background-color: var(--card-background); 
-  color: var(--text-color); 
-  margin: 5% auto; /* Ortala (yuxarıdan 5%) */
-  padding: clamp(20px, 4vw, 30px) clamp(25px, 5vw, 35px); /* Adaptiv daxili boşluq */
-  border: 1px solid var(--border-color); 
-  width: 90%; /* Ekran eninin 90%-i */
-  max-width: 450px; /* Maksimum en (zər modalları üçün daha kiçik ola bilər) */
-  border-radius: 10px; 
-  position: relative; /* Bağlama düyməsi üçün */
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
-  animation: modalContentSlideIn 0.3s ease-out; /* İçərik animasiyası */
+.modal-content {
+  background-color: var(--card-background);
+  color: var(--text-color);
+  margin: 5% auto; /* Yuxarıdan 5%, yanlardan avto (ortala) */
+  padding: clamp(20px, 4vw, 30px) clamp(25px, 5vw, 35px);
+  border: 1px solid var(--border-color);
+  width: 90%; /* Mobil üçün */
+  max-width: 450px; /* Maksimum en (otaq ayarları üçün) */
+  border-radius: 10px;
+  position: relative;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  animation: modalContentSlideIn 0.3s ease-out;
+}
+/* Zər və Simvol modalları üçün fərqli ölçü (dice.css-də ola bilər) */
+.dice-modal .modal-content,
+.symbol-select-modal .modal-content {
+    max-width: 400px; /* Biraz daha kiçik */
 }
 
-/* Bağlama Düyməsi (X) */
-.close-button { 
-  color: var(--subtle-text); 
-  position: absolute; 
-  top: 12px; 
-  right: 18px; 
-  font-size: 28px; 
-  font-weight: bold; 
-  cursor: pointer; 
-  transition: color 0.2s ease, transform 0.2s ease; 
-  line-height: 1; /* Hündürlüyü normallaşdır */
+
+/* Bağlama Düyməsi (X) - Otaq Ayarları üçün */
+.close-button {
+  color: var(--subtle-text);
+  position: absolute;
+  top: 12px;
+  right: 18px;
+  font-size: 28px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.2s ease;
+  line-height: 1;
 }
-.close-button:hover, .close-button:focus { 
-  color: #fff; 
-  transform: scale(1.1); 
+.close-button:hover, .close-button:focus {
+  color: #fff;
+  transform: scale(1.1);
 }
 
 /* Modal Başlığı (H3) */
-.modal h3 { 
-  text-align: center; 
-  margin-bottom: 25px; 
-  margin-top: 0; 
-  color: #fff; 
-  font-weight: 700; 
-  font-size: clamp(1.1rem, 3.5vw, 1.3rem); 
-  text-shadow: 0 0 5px var(--primary-color); 
+.modal h3 {
+  text-align: center;
+  margin-bottom: 25px;
+  margin-top: 0;
+  color: #fff;
+  font-weight: 700;
+  font-size: clamp(1.1rem, 3.5vw, 1.3rem);
+  text-shadow: 0 0 5px var(--primary-color);
 }
 
-/* Modal Gövdəsi (inputlar və s.) */
+/* Modal Gövdəsi */
 .modal .modal-body { padding-top: 10px; }
 
-/* Input Qrupları */
+/* Input Qrupları (Otaq Ayarları üçün) */
 .modal .input-group { margin-bottom: 18px; }
-.modal .input-group label { 
-  display: block; 
-  margin-bottom: 6px; 
-  font-weight: 600; 
-  font-size: 0.9em; 
-  color: var(--subtle-text); 
+.modal .input-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--subtle-text);
 }
 .modal .input-group input[type="text"],
-.modal .input-group input[type="password"], /* Şifrə üçün */
+.modal .input-group input[type="password"],
 .modal .input-group input[type="checkbox"],
 .modal .input-group select {
-  width: 100%; 
-  padding: 10px 14px; 
-  background-color: var(--background-color); 
+  width: 100%;
+  padding: 10px 14px;
+  background-color: var(--background-color);
   color: var(--text-color);
-  border: 1px solid var(--border-color); 
-  border-radius: 6px; 
-  font-size: 0.95rem; 
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.95rem;
   box-sizing: border-box;
   transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease;
 }
-.modal .input-group input[type="checkbox"] { 
-  width: auto; /* Avtomatik en */
-  vertical-align: middle; 
-  margin-right: 8px; 
-  padding: 0; 
-  accent-color: var(--primary-color); /* Checkbox rəngi */
+.modal .input-group input[type="checkbox"] {
+  width: auto;
+  vertical-align: middle;
+  margin-right: 8px;
+  padding: 0;
+  accent-color: var(--primary-color);
 }
 .modal .input-group input::placeholder { color: #777799; }
 .modal .input-group input[type="text"]:focus,
 .modal .input-group input[type="password"]:focus,
-.modal .input-group select:focus { 
-  outline: none; 
-  border-color: var(--primary-color); 
-  background-color: #2f2f5f; /* Fokusda arxa fon */
-  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.25); 
+.modal .input-group select:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  background-color: #2f2f5f;
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.25);
 }
-
-/* Otaq Ayarları Modalında Şifrə Alanı */
-.modal .input-group input[type="password"]#edit-room-password { 
-  margin-top: 8px; 
-  display: none; /* Başlanğıcda gizli */
+.modal .input-group input[type="password"]#edit-room-password {
+  margin-top: 8px;
+  display: none; /* JS ilə idarə olunur */
 }
-/* Şifrə alanını gizlətmək üçün (type="text" olsa belə) - Artıq type="password" olduğu üçün ehtiyac yoxdur. */
-/* .modal .input-group input[type="text"]#edit-room-password { -webkit-text-security: disc; text-security: disc; } */
 
 /* Modal Əməliyyat Düymələri (Yadda Saxla, Sil) */
-.modal .modal-actions { 
-  margin-top: 25px; 
-  display: flex; 
-  gap: 15px; 
-  justify-content: space-between; 
-  flex-wrap: wrap; 
+.modal .modal-actions {
+  margin-top: 25px;
+  display: flex;
+  gap: 15px;
+  justify-content: space-between;
+  flex-wrap: wrap;
 }
-.modal .modal-actions .button { 
-  flex-grow: 1; /* Boş yeri tutsunlar */
-  padding: 11px; 
-  font-size: 1rem; 
-  min-width: 120px; /* Minimum en */
+.modal .modal-actions .button {
+  flex-grow: 1;
+  padding: 11px;
+  font-size: 1rem;
+  min-width: 120px;
 }
-.modal .button.modal-delete-button { flex-grow: 1; } /* Sil düyməsi də boş yeri tutsun */
+.modal .button.modal-delete-button { /* Sil düyməsi üçün xüsusi stil lazım olsa */
+   flex-grow: 1;
+}
 
 /* Modal Mesaj Sahəsi */
-.modal .message { 
-  margin-top: 18px; 
-  text-align: center; 
-  font-size: 0.9rem; 
-  min-height: 1.3em; 
-  font-weight: 600; 
-  padding: 8px 12px; 
-  border-radius: 5px; 
-  border: 1px solid transparent; 
+.modal .message {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 0.9rem;
+  min-height: 1.3em;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 5px;
+  border: 1px solid transparent;
 }
 .modal .message.error { color: #f8d7da; background-color: rgba(220, 53, 69, 0.5); border-color: rgba(255, 77, 77, 0.7); }
 .modal .message.success { color: #d4edda; background-color: rgba(40, 167, 69, 0.5); border-color: rgba(57, 255, 20, 0.7); }
@@ -566,131 +648,153 @@ footer {
 @keyframes modalContentSlideIn { from { opacity: 0; transform: translateY(-30px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 /* --- Hissə 3/4 Sonu --- */
-/* oda_ici.css - Hissə 4/4 */
+/* ======================================================================== */
+/* oda_ici.css - Oyun Ekranı Stilleri (Yenidən Baxılır)                     */
+/* ======================================================================== */
+
+/* ... (Hissə 1, 2 və 3-dən kodlar buradadır) ... */
+
+/* ------------------------------------------------------------------------ */
+/* --- Part 4/4: Media Sorğuları (Responsivlik) & Yükləmə Ekranı --- */
+/* ------------------------------------------------------------------------ */
 
 /* Kiçik Ekran Ayarlamaları (@media) */
+
+/* Orta Ölçülü Ekranlar (Planşetlər, ~768px və daha kiçik) */
 @media (max-width: 768px) {
-  /* Orta ölçülü ekranlar (planşetlər) */
-  :root { 
-      /* Parçalanma effekti üçün şrift ölçüsünü azalda bilərik */
-      --shatter-font-size: 2.2rem; 
+  :root {
+      /* Parçalanma effekti şriftini biraz kiçildək */
+      --shatter-font-size: 2.2rem;
+       /* Orta ekranlar üçün hüceyrə ölçüləri (Root-da təyin olunanlar istifadə olunur,
+          amma lazım gələrsə burada override edə bilərik) */
+       /* Məsələn: --cell-size-small-dynamic: clamp(38px, 15vw, 75px); */
   }
-  .game-info { 
-      justify-content: space-around; /* Oyunçu məlumatlarını daha yaxşı yerləşdir */
+  .game-info {
+      justify-content: space-around; /* Oyunçu bloklarını daha yaxşı yerləşdir */
   }
-  .player-info { 
-      flex-basis: 45%; /* Hər oyunçuya təxminən 45% en ver */
+  .player-info {
+      flex-basis: 45%; /* Təxmini bərabər en */
   }
-  /* Bu ölçüdə 5x5 və 6x6 lövhələrin sığması üçün əlavə tənzimləmələr lazım ola bilər */
-  /* Məsələn, .game-board üçün max-width azaltmaq və ya --current-cell-size-i clamp ilə daha da kiçiltmək */
+  /* Bu ölçüdə 6x6 lövhənin sığması üçün .game-container max-width artırıla bilər */
+  /* .game-container { max-width: 850px; } */
 }
 
+/* Kiçik Ekranlar (Mobil Telefonlar, ~480px və daha kiçik) */
 @media (max-width: 480px) {
-  /* Kiçik ekranlar (mobil telefonlar) */
-  :root { 
-      /* Parçalanma effektini daha da kiçilt */
-      --shatter-font-size: var(--shatter-font-size-small); 
-      /* --- Mobil üçün hüceyrə ölçülərini xeyli kiçiltmək LAZIMDIR --- */
-      /* --- Bu dəyərlər təcrübi olaraq seçilməlidir! --- */
-       --cell-size-large-dynamic: clamp(45px, 20vw, 80px); 
-       --cell-size-medium-dynamic: clamp(40px, 18vw, 70px); 
-       --cell-size-small-dynamic: clamp(35px, 15vw, 60px); /* 5x5 və 6x6 üçün */
+  :root {
+      /* Parçalanma effekti şriftini daha da kiçilt */
+      --shatter-font-size: var(--shatter-font-size-small); /* 1.8rem */
+
+      /* --- MOBİL ÜÇÜN HÜCEYRƏ ÖLÇÜLƏRİ --- */
+      /* Bu dəyərlər test edilərək tənzimlənməlidir ki, 6x6 belə sığsın */
+      /* Daha kiçik minimum dəyərlər təyin edək */
+       --cell-size-large-dynamic: clamp(45px, 18vw, 75px);  /* 3x3 */
+       --cell-size-medium-dynamic: clamp(40px, 16vw, 65px);  /* 4x4 */
+       --cell-size-small-dynamic: clamp(32px, 14vw, 55px);   /* 5x5, 6x6 <<< min 32px */
+
+       /* Şrift ölçüsü də avtomatik azalacaq */
+       /* --current-font-size: calc(var(--current-cell-size) * 0.6); */
   }
-  body { padding: 5px; } /* Kənar boşluğu azalt */
-  .game-container { padding: 10px; gap: 10px; margin: 10px auto; } /* Daxili və xarici boşluqları azalt */
-  
-  .game-header { 
-      padding-bottom: 10px; 
-      flex-direction: column; /* Başlıq elementlərini alt-alta düz */
+  body { padding: 5px; } /* Kənar boşluğu minimuma endir */
+  .game-container { padding: 10px; gap: 10px; margin: 5px auto; } /* İç və kənar boşluqları azalt */
+
+  /* Başlıq */
+  .game-header {
+      padding-bottom: 10px;
+      flex-direction: column; /* Alt-alta düz */
       text-align: center;
   }
-  .game-header h1 { 
-       margin-bottom: 8px; /* Başlıq və düymələr arası */
-       font-size: 1.1rem; /* Başlıq şriftini kiçilt */
+  .game-header h1 {
+       margin-bottom: 8px;
+       font-size: 1.0rem; /* Başlığı kiçilt */
    }
-  .header-buttons { 
-      justify-content: center; /* Düymələri mərkəzə çək */
-      width: 100%; 
-      margin-top: 5px; 
-      gap: 5px; /* Düymələr arası boşluğu azalt */
+  .header-buttons {
+      justify-content: center;
+      width: 100%;
+      margin-top: 5px;
+      gap: 5px; /* Düymə aralarını azalt */
+      /* Düymələr sığmazsa alta düşəcək (flex-wrap: wrap) */
   }
-  .header-buttons .button { padding: 6px 10px; font-size: 0.75rem; } /* Düymələri kiçilt */
-  .header-buttons .button.icon-button { font-size: 0.9rem; padding: 6px 8px; }
+  .header-buttons .button { padding: 6px 8px; font-size: 0.7rem; } /* Düymələri kiçilt */
+  .header-buttons .button.icon-button { font-size: 0.8rem; padding: 6px 7px; }
 
-  .game-info { 
-      padding: 8px; 
-      flex-direction: column; /* Oyunçu məlumatlarını alt-alta düz */
+  /* Oyun Məlumat Paneli */
+  .game-info {
+      padding: 8px 5px; /* Boşluqları azalt */
+      flex-direction: column;
       gap: 5px;
   }
-  .turn-indicator { 
-      order: 0; /* Sıra göstəricisi ən üstdə qalsın */
-      margin-bottom: 8px; 
-      font-size: 0.9rem; 
-  }
-  .player-info { 
-      flex-basis: 100%; /* Tam en tutsun */
-      gap: 5px; 
-      justify-content: space-between; /* Ad və simvolu aralı qoy */
-      padding: 3px 8px;
-  }
-  .player-symbol { font-size: 1.1rem; }
-  .player-name { font-size: 0.8rem; }
+  .turn-indicator { order: 0; margin-bottom: 8px; font-size: 0.85rem; }
+  .player-info { flex-basis: 100%; gap: 5px; justify-content: space-between; padding: 3px 8px;}
+  .player-symbol { font-size: 1.0rem; }
+  .player-name { font-size: 0.75rem; }
 
+  /* Oyun Lövhəsi */
   .game-board-container { margin: 10px 0; }
-  .game-board { 
-      padding: 5px; /* Lövhə kənar boşluğunu azalt */
-      gap: 3px; /* Hüceyrələr arası boşluğu azalt */
-      /* Əgər lövhə yenə də sığmırsa, konteynerə scroll əlavə etmək olar: */
-      /* overflow-x: auto;  */
+  .game-board {
+      padding: 5px;
+      gap: 3px; /* Hüceyrə aralarını azalt */
+      /* Əgər lövhə hələ də sığmırsa, scroll əlavə et: */
+      /* overflow-x: auto; */
+      /* Və ya bütün konteyneri biraz kiçiltmək üçün transform:scale istifadə et? (Riskli) */
+      /* transform: scale(0.95); */
   }
-  
-  .game-status { font-size: 1rem; } /* Status şriftini kiçilt */
-  .button.secondary-button { padding: 9px 12px; font-size: 0.85rem; } /* Restart düyməsi */
-  
-  .modal-content { padding: 15px 20px; margin: 10% auto; max-width: 95%; /* Mobil üçün modalı böyüt */ }
-  .modal .modal-actions { flex-direction: column; } /* Modal düymələrini alt-alta düz */
+
+  .game-status { font-size: 0.9rem; } /* Status mətnini kiçilt */
+  .button.secondary-button { padding: 8px 10px; font-size: 0.8rem; } /* Restart düyməsi */
+
+  /* Modal Pəncərələr */
+  .modal-content { padding: 15px 15px; margin: 8% auto; max-width: 95%; }
+  .modal .modal-actions { flex-direction: column; gap: 10px; } /* Düymələri alt-alta */
   .modal .modal-actions .button { min-width: unset; }
+  .modal h3 { font-size: 1.1rem; } /* Modal başlığını kiçilt */
+  .modal .input-group label { font-size: 0.85em; }
+  .modal .input-group input, .modal .input-group select { font-size: 0.9rem; padding: 8px 12px;}
 }
 
+
 /* Yükləmə Ekranı Stili */
-#game-loading-overlay { 
-  position: fixed; 
-  top: 0; 
-  left: 0; 
-  width: 100%; 
-  height: 100%; 
-  background-color: #000; /* Qara arxa fon */
-  display: none; /* JS ilə görünür olacaq */
-  justify-content: center; 
-  align-items: center; 
-  flex-direction: column; 
+#game-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #000; /* Tam qara fon */
+  display: none; /* Başlanğıcda gizli */
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
   z-index: 2000; /* Hər şeydən üstdə */
-  opacity: 0; 
-  transition: opacity 0.5s ease-out; 
+  opacity: 0;
+  transition: opacity 0.5s ease-out;
 }
 #game-loading-overlay.visible { display: flex; opacity: 1; }
 
-/* Yükləmə Animasiyası (HTML-dən götürülüb) */
-.loading-animation-container { 
-  height: clamp(150px, 40vw, 200px); /* Adaptiv ölçü */
-  width: clamp(150px, 40vw, 200px); 
-  position: relative; 
-  margin-bottom: 25px; 
+/* Yükləmə Animasiyası */
+.loading-animation-container {
+  /* Ölçü ekran ölçüsünə görə clamp ilə təyin olunur */
+  height: clamp(150px, 40vw, 200px);
+  width: clamp(150px, 40vw, 200px);
+  position: relative;
+  margin-bottom: 25px;
 }
 .loading-animation-container .container { height: 100%; width: 100%; position: absolute; top: 0; left: 0; }
-.loading-animation-container .square { height: 94%; width: 94%; background: white; position: absolute; top: 50%; left: 50%; margin: -47% 0 0 -47%; }
+.loading-animation-container .square { height: 94%; width: 94%; background: white; position: absolute; top: 50%; left: 50%; margin: -47% 0 0 -47%; /* Mərkəzləmə */ }
 .loading-animation-container .black { background: black; animation: rotate 10s infinite linear; }
 @keyframes rotate { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 /* Yükləmə Mətni */
-.game-loading-text { 
-  color: #fff; 
-  font-size: 1.1em; 
-  font-weight: 600; 
-  text-align: center; 
+.game-loading-text {
+  color: #fff;
+  font-size: 1.1em;
+  font-weight: 600;
+  text-align: center;
   margin-top: 15px; /* Animasiyadan sonra boşluq */
 }
 
-/* dice.css faylının ayrıca linkləndiyini unutmayın (əgər CSS import istifadə edilmirsə) */
+/* dice.css faylının ayrıca linkləndiyini unutmayın */
 
-/* --- Faylın Sonu --- */
+/* ------------------------------------------------------------------------ */
+/* --- oda_ici.css Faylının Sonu --- */
+/* ------------------------------------------------------------------------ */

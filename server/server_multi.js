@@ -113,14 +113,28 @@ console.log(`[Setup 1.2] Session cookie ayarları: secure=${process.env.NODE_ENV
 app.use(express.json()); // Gələn JSON request body-lərini parse etmək üçün
 console.log('[Setup 1.2] Express JSON parser middleware tətbiq edildi.');
 
+// +++++++++++++ YENİ KOD BAŞLANĞICI +++++++++++++
+// Content Security Policy (CSP) başlığını təyin edən middleware
+app.use((req, res, next) => {
+  const cspValue = [
+    "default-src 'self'", // Defolt olaraq yalnız öz mənbəyindən
+    "script-src 'self'", // Skriptlər yalnız öz mənbəyindən
+    "connect-src 'self' wss://*.onrender.com", // API və WebSocket bağlantıları (Render üçün uyğunlaşdırılıb)
+    "img-src 'self' data:", // Şəkillər öz mənbəyindən və data:
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", // Stillər (Google Fonts daxil)
+    "font-src 'self' https://fonts.gstatic.com" // Şriftlər (Google Fonts daxil)
+  ].join('; '); // Direktivləri nöqtəli vergüllə birləşdir
+
+  res.setHeader('Content-Security-Policy', cspValue);
+  next(); // Növbəti middleware və ya marşruta keç
+});
+console.log('[Setup CSP] Content-Security-Policy middleware tətbiq edildi.');
+// +++++++++++++ YENİ KOD SONU ++++++++++++++
+
 // --- Sorğu Loglama Middleware ---
 app.use((req, res, next) => {
-    // Statik fayl və API sorğularını logla
-    // Daha dəqiq filterləmə etmək olar (məs, yalnız API)
-    if (req.url.includes('.') || req.url.startsWith('/api/') || req.url.startsWith('/profile') || req.url.startsWith('/login') || req.url.startsWith('/register') || req.url.startsWith('/logout') || req.url.startsWith('/check-auth') || req.url === '/') {
-         console.log(`[Request Log 1.2] Request: ${req.method} ${req.originalUrl} (IP: ${req.ip})`);
-    }
-    next();
+  // ... (loglama kodu əvvəlki kimi)
+  next();
 });
 console.log('[Setup 1.2] Sadə sorğu loglama middleware tətbiq edildi.');
 

@@ -1330,133 +1330,132 @@ io.on('connection', (socket) => {
 
 // io.on('connection', (socket) => {
 //     ... (Part 5.1, 5.2, 5.3-dən kodlar) ...
-
+// --------------------------------------------------------------------
+    // --- Part 5.4: 'player_ready_in_room' Hadisə Handler-i (DÜZƏLİŞ EDİLMİŞ) ---
     // --------------------------------------------------------------------
-    // --- Part 5.4: 'player_ready_in_room' Hadisə Handler-i (Yenidən İşlənmiş) ---
-    // --------------------------------------------------------------------
-    // Qeyd: Client oyun otağı səhifəsinə daxil olduqda və ya yenilədikdə
-    // serverə hazır olduğunu bildirir. Server mövcud oyun vəziyyətini
-    // göndərir və ya lazım gələrsə yenidən qoşulmanı idarə edir.
-
     socket.on('player_ready_in_room', (data) => {
-      const user = socket.user;
-      const currentUserSocketInfo = users[socket.id];
-      console.log(`[Socket Event 5.4 - player_ready] Hadisə alındı: User=${user?.nickname}, Data=`, data);
+        const user = socket.user;
+        const currentUserSocketInfo = users[socket.id];
+        console.log(`[Socket Event 5.4 - player_ready] Hadisə alındı: User=${user?.nickname}, Data=`, data);
 
-      if (!user || !currentUserSocketInfo) {
-          console.error(`[Socket Event 5.4 - player_ready] XƏTA: user (${user?.nickname}) və ya currentUserSocketInfo (${socket.id}) tapılmadı!`);
-          return socket.emit('error_message', 'Server xətası: İstifadəçi məlumatları tapılmadı.'); // Ümumi xəta hadisəsi
-      }
-      if (!data || !data.roomId) {
-          console.warn(`[Socket Event 5.4 - player_ready] XƏTA: Otaq ID göndərilmədi. User=${user.nickname}`);
-          return socket.emit('error_message', 'Otaq ID göndərilmədi.');
-      }
+        if (!user || !currentUserSocketInfo) {
+            console.error(`[Socket Event 5.4 - player_ready] XƏTA: user (${user?.nickname}) və ya currentUserSocketInfo (${socket.id}) tapılmadı!`);
+            return socket.emit('game_error', 'Server xətası: İstifadəçi məlumatları tapılmadı.');
+        }
+        if (!data || !data.roomId) {
+            console.warn(`[Socket Event 5.4 - player_ready] XƏTA: Otaq ID göndərilmədi. User=${user.nickname}`);
+            return socket.emit('game_error', 'Otaq ID göndərilmədi.');
+        }
 
-      const roomId = data.roomId;
-      const room = rooms[roomId];
+        const roomId = data.roomId;
+        const room = rooms[roomId];
 
-      // --- Otağın Mövcudluğunu Yoxla ---
-      if (!room) {
-          console.warn(`[Socket Event 5.4 - player_ready] XƏTA: Otaq tapılmadı (${roomId}). User=${user.nickname}. Lobiyə yönləndirilir.`);
-          // Client tərəfi bu hadisəni alıb yönləndirmə etməlidir
-          return socket.emit('force_redirect_lobby', { message: "Daxil olmaq istədiyiniz otaq artıq mövcud deyil." });
-      }
+        if (!room) {
+            console.warn(`[Socket Event 5.4 - player_ready] XƏTA: Otaq tapılmadı (${roomId}). User=${user.nickname}. Lobiyə yönləndirilir.`);
+            return socket.emit('force_redirect_lobby', { message: "Daxil olmaq istədiyiniz otaq artıq mövcud deyil." });
+        }
 
-      // AI otaqları üçün xüsusi bir şey etməyə ehtiyac yoxdur, çünki state saxlanılmır.
-      if (room.isAiRoom) {
-          console.log(`[Socket Event 5.4 - player_ready] AI otağı (${roomId}) üçün qəbul edildi. Xüsusi state göndərilmir.`);
-          // Bəlkə client-ə AI otağı olduğunu təsdiqləyən bir mesaj göndərmək olar?
-          // socket.emit('room_info', { name: room.name, isAiRoom: true, boardSize: room.boardSize }); // Client onsuz da URL-dən bilir
-          return;
-      }
+        // ----- Otağa Qoşulma və State İdarəetməsi (Həm AI, həm Real) -----
+        try {
+            // Socket-i Socket.IO otağına qoş
+            if (!socket.rooms.has(roomId)) {
+                socket.join(roomId);
+                console.log(`[Socket IO 5.4] Socket (${socket.id}) ${roomId} rumuna qoşuldu (və ya təkrar qoşuldu).`);
+            }
+            // İstifadəçinin cari otağını yenilə
+            if (!currentUserSocketInfo.currentRoom) {
+                currentUserSocketInfo.currentRoom = roomId;
+                console.log(`[State 5.4] İstifadəçi (${user.nickname}) üçün currentRoom təyin edildi: ${roomId}`);
+            }
 
-      // --- Real Otaq Üçün Məntiq ---
-      try {
-          // Socket-i Socket.IO otağına qoş (əgər hələ qoşulmayıbsa - refresh sonrası)
-          if (!socket.rooms.has(roomId)) {
-              socket.join(roomId);
-              console.log(`[Socket IO 5.4] Socket (${socket.id}) ${roomId} rumuna təkrar qoşuldu.`);
-          }
-          // İstifadəçinin cari otağını yenilə (əgər null idisə)
-          if (!currentUserSocketInfo.currentRoom) {
-               currentUserSocketInfo.currentRoom = roomId;
-               console.log(`[State 5.4] İstifadəçi (${user.nickname}) üçün currentRoom təyin edildi: ${roomId}`);
-          }
+            let gameState = room.gameState; // Mövcud state-i al
+            let isReconnecting = false;
+            let playerSlotReconnecting = null;
 
-           // --- Yenidən Qoşulma (Reconnect) Halını İdarə Et ---
-           let isReconnecting = false;
-           if (room.gameState) { // Yalnız gameState varsa yenidən qoşulma ola bilər
-               let playerSlot = null; // Oyunçunun 1-ci yoxsa 2-ci olduğunu təyin et
-               if (room.gameState.player1UserId === user.userId) playerSlot = 1;
-               else if (room.gameState.player2UserId === user.userId) playerSlot = 2;
+            // --- Yenidən Qoşulma Halını Yoxla (Real Otaqlar Üçün) ---
+            if (gameState && !room.isAiRoom) {
+                if (gameState.player1UserId === user.userId && gameState.player1SocketId !== socket.id) {
+                    playerSlotReconnecting = 1;
+                } else if (gameState.player2UserId === user.userId && gameState.player2SocketId !== socket.id) {
+                    playerSlotReconnecting = 2;
+                }
 
-               if (playerSlot && room.gameState[`player${playerSlot}SocketId`] !== socket.id) {
-                   console.log(`[Socket Event 5.4 - player_ready] İstifadəçi ${user.nickname} (ID: ${user.userId}) Player ${playerSlot} olaraq yenidən qoşulur.`);
-                   const oldSocketId = room.gameState[`player${playerSlot}SocketId`];
-                   
-                   // Yeni socket ID-ni gameState və players massivində yenilə
-                   room.gameState[`player${playerSlot}SocketId`] = socket.id;
-                   const playerIndex = room.players.indexOf(oldSocketId);
-                   if (playerIndex > -1) { 
-                       room.players.splice(playerIndex, 1, socket.id); 
-                       console.log(`[State 5.4] Otağın (${roomId}) players massivi yeniləndi. Yeni: ${room.players.join(', ')}`);
-                   } else if (!room.players.includes(socket.id)) {
-                       room.players.push(socket.id); // Əgər nədənsə yox idisə, əlavə et
-                       console.warn(`[State 5.4] Yenidən qoşulan oyunçu (${socket.id}) players massivində yox idi, əlavə edildi.`);
-                   }
-                   isReconnecting = true;
-                   
-                   // Digər oyunçuya da (əgər qoşuludursa) yenidən qoşulma barədə məlumat verək? (Optional)
-                   // const otherPlayerSocketId = playerSlot === 1 ? room.gameState.player2SocketId : room.gameState.player1SocketId;
-                   // if (otherPlayerSocketId && io.sockets.sockets.get(otherPlayerSocketId)) {
-                   //     io.to(otherPlayerSocketId).emit('opponent_reconnected', { username: user.nickname });
-                   // }
-               }
-           }
+                if (playerSlotReconnecting) {
+                    isReconnecting = true;
+                    console.log(`[Socket Event 5.4 - player_ready] İstifadəçi ${user.nickname} Player ${playerSlotReconnecting} olaraq yenidən qoşulur.`);
+                    const oldSocketId = gameState[`player${playerSlotReconnecting}SocketId`];
+                    gameState[`player${playerSlotReconnecting}SocketId`] = socket.id;
 
-          // --- Cavab Göndərmə ---
-          if (room.gameState) {
-              // Əgər oyun vəziyyəti varsa (istər davam edən, istər bitmiş), onu göndər
-              console.log(`[Socket IO 5.4] Mövcud oyun vəziyyəti (${roomId}) ${user.nickname}-ə (${socket.id}) göndərilir. Reconnect=${isReconnecting}`);
-              // Həmişə emitGameStateUpdate istifadə edək ki, hər iki tərəf sinxronlaşsın
-              emitGameStateUpdate(roomId, 'player_ready');
-              // socket.emit('game_state_update', room.gameState); // Yalnız qoşulana göndərmək də olar
-          } else {
-              // Əgər gameState yoxdursa (ikinci oyunçu hələ qoşulmayıb)
-              console.log(`[Socket IO 5.4] Otaqda (${roomId}) aktiv oyun yoxdur. ${user.nickname} rəqib gözləyir.`);
-              // Client tərəfə rəqib gözlədiyini bildirmək üçün ilkin/boş state göndərə bilərik
-              // Və ya client tərəf `room_info` hadisəsini gözləyə bilər.
-              // Gəlin sadəlik üçün clientin `room_info`-nu gözlədiyini fərz edək.
-              // Əlavə olaraq, server tərəfdən otağın bəzi detallarını göndərək.
-               const opponentSocketId = room.players.find(pId => pId !== socket.id);
-               const opponentUsername = opponentSocketId ? users[opponentSocketId]?.username : null;
-               socket.emit('room_info', {
-                  name: room.name,
-                  creatorUsername: room.creatorUsername,
-                  hasPassword: !!room.password,
-                  boardSize: room.boardSize,
-                  opponentUsername: opponentUsername // Rəqib varsa adını göndər
-               });
-               // Əgər rəqib varsa amma gameState yoxdursa (qəribə hal), oyunu başlatmağa cəhd et?
-               if(room.players.length === 2 && !room.gameState){
-                    console.warn(`[Socket Event 5.4 - player_ready] Otaqda (${roomId}) 2 oyunçu var amma gameState yoxdur! Yenidən yaradılır...`);
-                    initializeGameState(room, room.players[0], room.players[1]);
-                    emitGameStateUpdate(roomId, 'player_ready_gamestate_missing');
-               }
-          }
+                    const playerIndex = room.players.indexOf(oldSocketId);
+                    if (playerIndex > -1) { room.players.splice(playerIndex, 1, socket.id); }
+                    else if (!room.players.includes(socket.id)) { room.players.push(socket.id); }
+                    console.log(`[State 5.4] Otağın (${roomId}) players massivi yenidən qoşulma üçün yeniləndi: ${room.players.join(', ')}`);
+                }
+            }
 
-          // Otaq siyahısını da yeniləyək (əgər yenidən qoşulma adları dəyişibsə)
-           if(isReconnecting) {
-               broadcastRoomList();
-           }
+            // --- Yeni Oyun Başlatma və ya Mövcud State Göndərmə ---
+            if (!gameState && !isReconnecting) {
+                // Əgər gameState yoxdursa və yenidən qoşulma deyilsə, yeni state yarat
+                console.log(`[Socket Event 5.4 - player_ready] ${roomId} üçün yeni gameState yaradılır...`);
+                // createInitialGameState artıq mövcud olmalıdır və room.gameState-i təyin etməlidir
+                initializeGameState(room, socket.id, null); // Yalnız ilk oyunçunu əlavə edirik
+                gameState = room.gameState; // Yenidən alaq
 
-      } catch (error) {
-          console.error(`[Socket Event 5.4 - player_ready] Hazır statusu emal edilərkən xəta. Room=${roomId}, User=${user?.nickname}:`, error);
-          if (!socket.disconnected) {
-               socket.emit('error_message', 'Oyun vəziyyəti alınarkən server xətası baş verdi.');
-          }
-      }
-  }); // socket.on('player_ready_in_room', ...) sonu
+                if (room.isAiRoom) {
+                    console.log(`[Socket Event 5.4 - player_ready] AI otağı üçün AI oyunçusu əlavə edilir...`);
+                    // AI oyunçusunu əlavə edən funksiya (əgər varsa)
+                    // addAiPlayerToGame(gameState, room); // Məsələn: gameState.player2Username = "SNOW"; gameState.player2SocketId = "AI_SNOW";
+                    gameState.player2SocketId = 'AI_SNOW'; // Simvolik ID
+                    gameState.player2Username = 'SNOW';    // AI adı
+                    gameState.player2UserId = 'AI_SNOW';     // Simvolik User ID
+                    // AI oyununda zər atma və simvol seçimi mərhələsi avtomatik keçirilsin?
+                    // Məsələn, P1 həmişə X, AI həmişə O olsun və P1 başlasın.
+                    gameState.player1Symbol = 'X';
+                    gameState.player2Symbol = 'O';
+                    gameState.currentPlayerSymbol = 'X'; // İnsan oyunçu başlasın
+                    gameState.statusMessage = `Sıra: ${gameState.player1Username || 'Siz'}`;
+                    gameState.isGameOver = false; // Oyunu başladaq
+                    console.log(`[State 5.4] AI oyunu üçün ilkin simvollar və sıra təyin edildi.`);
+                } else {
+                    // Real multiplayer otağıdırsa, ikinci oyunçu gözlənilir
+                    gameState.statusMessage = "Rəqib gözlənilir...";
+                }
+            }
+
+            // --- Son Vəziyyəti Göndər ---
+            if (gameState) {
+                console.log(`[Socket IO 5.4] Oyun vəziyyəti (${roomId}) ${user.nickname}-ə (${socket.id}) göndərilir.`);
+                // Həmişə emitGameStateUpdate istifadə edək ki, otaqdakı hər kəs (əgər varsa) yenilənsin
+                emitGameStateUpdate(roomId, 'player_ready');
+            } else {
+                // Bu hala normalda düşməməlidir, amma ehtiyat üçün
+                console.error(`[Socket Event 5.4 - player_ready] XƏTA: GameState yaradıla bilmədi və ya tapılmadı! Room=${roomId}`);
+                socket.emit('game_error', 'Oyun vəziyyəti yaradıla bilmədi.');
+            }
+
+            // Otaq məlumatlarını göndər (yaradan, ölçü və s.)
+            // Client bu məlumatı başlıqdakı düymələri göstərmək/gizlətmək üçün istifadə edəcək
+            try {
+                 const roomInfoForClient = getRoomInfoForClient(room); // Belə bir funksiyanız olmalıdır
+                 socket.emit('room_info', roomInfoForClient);
+                 console.log(`[Socket IO 5.4] room_info göndərildi:`, roomInfoForClient);
+            } catch (infoError) {
+                 console.error(`[Socket IO 5.4] room_info göndərilərkən xəta:`, infoError);
+            }
+
+
+            // Otaq siyahısını yenilə (əgər adlar/oyunçu sayı dəyişibsə)
+            if(isReconnecting) {
+                broadcastRoomList();
+            }
+
+        } catch (error) {
+            console.error(`[Socket Event 5.4 - player_ready] Hazır statusu emal edilərkən xəta. Room=${roomId}, User=${user?.nickname}:`, error);
+            if (!socket.disconnected) {
+                socket.emit('game_error', 'Oyun vəziyyəti alınarkən server xətası baş verdi.');
+            }
+        }
+    }); // socket.on('player_ready_in_room', ...) sonu
 
   // ======================================================
   // === BU BLOKUN İÇİNDƏ DİGƏR HADİSƏ DİNLƏYİCİLƏRİ ===

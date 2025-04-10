@@ -22,10 +22,12 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     let socket = null;                  // Socket.IO bağlantı obyekti
     let currentGameState = {};          // Serverdən gələn ƏN SON oyun vəziyyətini saxlayacaq obyekt
     let isCurrentUserCreator = false;   // Bu client otağı yaradıb mı? (server room_info ilə göndərəcək)
+    let currentRoomData = {};           // Otaq haqqında ilkin məlumatlar (lobby və ya room_info-dan)
 
     // Client tərəfli UI vəziyyət dəyişənləri (server state-indən təsirlənməyən)
     let isDiceRolling = false;          // Zər fırlanma animasiyası gedirmi?
     let isProcessingMove = false;       // Hərəkət serverə göndərilib cavab gözlənilirmi? (Təkrarlanan kliklərin qarşısını almaq üçün)
+    let isOpponentPresent = false;      // Rəqib qoşulubmu? (Server state-dən alınacaq)
 
     // Oyunla bağlı dəyişənlər (bunlar əsasən `currentGameState`dən oxunacaq/yenilənəcək)
     let boardSize = 3;                  // Default, initializeGame-də URL-dən alınıb serverə güvəniləcək
@@ -34,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     let player2Symbol = '?';            // Rəqibin simvolu (gameState-dən)
     let currentPlayerName = 'Siz';      // Adətən loggedInUser.nickname olacaq
     let opponentPlayerName = 'Rəqib';   // gameState-dən
+    let isGameOver = false;             // Oyun bitibmi? (Server state-dən alınacaq)
 
     // SNOW ilə bağlı qlobal dəyişənlər (Hələlik lokal idarə edilir, gələcəkdə serverə keçirilə bilər)
     let isPlayingAgainstAI = false;     // Lokal olaraq AI çağırmışıqmı?
@@ -60,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     const shatteringTextContainer = document.getElementById('shattering-text-container');
     const editRoomBtn = document.getElementById('edit-room-btn');
     const editRoomModal = document.getElementById('edit-room-modal');
-    const closeEditModalButton = editRoomModal?.querySelector('.close-button');
+    const closeEditModalButton = editRoomModal?.querySelector('.close-button'); // Optional chaining
     const saveRoomChangesBtn = document.getElementById('save-room-changes-btn');
     const deleteRoomConfirmBtn = document.getElementById('delete-room-confirm-btn');
     const editRoomMessage = document.getElementById('edit-room-message');
@@ -83,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     const symbolSelectModal = document.getElementById('symbol-select-modal');
     const symbolSelectTitle = document.getElementById('symbol-select-title');
     const symbolSelectMessage = document.getElementById('symbol-select-message');
+    // Düzəliş: Artıq `}` yoxdur
     const symbolOptionsDiv = symbolSelectModal?.querySelector('.symbol-options');
     const symbolWaitingMessage = document.getElementById('symbol-waiting-message');
 
@@ -103,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     const dragThreshold = 10; const rotateSensitivity = 0.4; let initialCenterZ = -55;
 
 
+// --- Hissə 1 Sonu ---
 // --- Hissə 1.1 Sonu (DOMContentLoaded bloku hələ bağlanmayıb!) ---
 // ------------------------------------------------------------------------
 // ========================================================================
@@ -175,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     // ---- URL Parametrlərini Alma Funksiyası ----
     // Qeyd: Bu funksiya səhifə yüklənəndə ilkin məlumatları (otaq ID, ölçü) almaq üçün istifadə edilir.
     function getUrlParams() {
-        console.log("https://api.rubyonrails.org/classes/ActionController/Parameters.html URL parametrləri oxunur...");
+        console.log("URL parametrləri oxunur..."); // https://api.rubyonrails.org/classes/ActionController/Parameters.html çıxarıldı
         const params = new URLSearchParams(window.location.search);
         // Otaq ID
         const roomIdParam = params.get('roomId');
@@ -194,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             size: validatedSize,
             playWithAI: playWithAI // Lobidən birbaşa AI oyunu istəyi
         };
-        console.log("https://api.rubyonrails.org/classes/ActionController/Parameters.html Alınan parametrlər:", result);
+        console.log("Alınan parametrlər:", result);
         return result;
     }
 
@@ -273,6 +278,9 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             cell.classList.add('cell');
             cell.dataset.index = i;
             cell.style.cursor = 'not-allowed'; // Başlanğıcda bloklu
+            // Listenerları burada əlavə edək ki, hər update-də əlavə/silməyək
+            cell.addEventListener('click', handleCellClick);
+            cell.setAttribute('data-listener-attached', 'true'); // Əlavə olunduğunu qeyd edək
             boardElement.appendChild(cell);
             cells.push(cell); // Yeni hüceyrə referansını saxla
         }
@@ -291,12 +299,12 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     function updateBoardUI(boardState, isMyTurn, gameIsOver, winningCombo = []) {
         // console.log(`[UI Render 2.1] updateBoardUI çağırıldı. MyTurn=${isMyTurn}, GameOver=${gameIsOver}`);
         if (!boardElement) { console.error("[UI Render 2.1] updateBoardUI: boardElement tapılmadı!"); return; }
-        if (boardState.length !== cells.length) {
-            console.error(`[UI Render 2.1] updateBoardUI XƏTA: Server lövhə ölçüsü (${boardState.length}) client hüceyrə sayı (${cells.length}) ilə uyğun gəlmir!`);
-            // Bəlkə lövhəni yenidən yaratmaq lazımdır?
-            // createBoard(); // Bu riskli ola bilər, state uyğunsuzluğu yarada bilər.
-            return;
+        if (!cells || cells.length !== boardState.length) {
+            console.error(`[UI Render 2.1] updateBoardUI XƏTA: Server lövhə ölçüsü (${boardState.length}) client hüceyrə sayı (${cells?.length ?? 0}) ilə uyğun gəlmir! Lövhə yenidən yaradılır...`);
+            createBoard(); // Lövhəni yenidən yaratmaq daha təhlükəsizdir
+            // return; // Yenidən yaradıldıqdan sonra bu update işləməyəcək, növbəti update-i gözləmək lazımdır
         }
+
 
         const canClick = !gameIsOver && isMyTurn; // Nə vaxt klikləmək olar
 
@@ -308,7 +316,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             if (cell.textContent !== serverMark) {
                  cell.textContent = serverMark;
                  // Klassları təmizlə və yenisini əlavə et
-                 cell.classList.remove('X', 'O', 'winning');
+                 cell.classList.remove('X', 'O'); // winning ayrıca idarə olunur
                  if (serverMark === 'X') {
                      cell.classList.add('X');
                  } else if (serverMark === 'O') {
@@ -316,32 +324,12 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
                  }
             }
 
-            // Klikləmə statusunu yenilə
+            // Klikləmə statusunu (cursor) yenilə
+            // Listener onsuz da createBoard-da əlavə olunub
             if (serverMark === '' && canClick) {
                 cell.style.cursor = 'pointer';
-                // Listenerın təkrar əlavə olunmaması üçün onu əvvəlcə silib sonra əlavə edək
-                // (Sadə üsul: Amma hər update-də etmək performansa təsir edə bilər)
-                // Daha yaxşı üsul: Listenerı yalnız bir dəfə əlavə etmək və handleCellClick içində yoxlamaq.
-                // Hazırda handleCellClick onsuz da yoxlama edir, ona görə listenerı qaldırmayaq.
-                // Amma əgər handleCellClick çağırılmırsa, listenerın əlavə olunduğundan əmin olmaq lazımdır.
-                // İlkin yaratmada listener əlavə etmədiyimiz üçün burada əlavə edək (əgər yoxdursa).
-                // TODO: Listener idarəetməsini optimallaşdır. Hələlik hər dəfə əlavə edək? Yox, risklidir.
-                // Ən yaxşısı, listenerı createBoard-da əlavə etmək və handleCellClick-də idarə etməkdir.
-                // Let's modify createBoard to add listeners, and handleCellClick to check if click is valid.
-                 // Assume handleCellClick handles validity checks.
-                 if (!cell.hasAttribute('data-listener-attached')) { // Yalnız listener yoxdursa əlavə et
-                      cell.addEventListener('click', handleCellClick);
-                      cell.setAttribute('data-listener-attached', 'true');
-                 }
-
             } else {
                 cell.style.cursor = 'not-allowed';
-                // Əgər listener varsa və artıq klikləmək olmazsa, onu silək? (Optional)
-                // Bu, klonlama qədər təmiz olmaya bilər.
-                 if (cell.hasAttribute('data-listener-attached')) {
-                    cell.removeEventListener('click', handleCellClick); // Listenerı silək
-                    cell.removeAttribute('data-listener-attached');
-                 }
             }
 
             // Qazanma xəttini işıqlandır (əgər varsa)
@@ -355,9 +343,8 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
 
         // Lövhənin ümumi görünüşü
         boardElement.style.opacity = gameIsOver ? '0.7' : '1'; // Oyun bitibsə solğunlaşdır
-        boardElement.style.pointerEvents = gameIsOver ? 'none' : 'auto'; // Oyun bitibsə bütün klikləri blokla
-        // Amma yuxarıdakı fərdi hüceyrə pointerEvents daha dəqiq olmalıdır.
-        // Ümumi bloklamanı sıra rəqibdə olduqda etmək daha yaxşıdır (bunu game_state_update handler edəcək).
+        // Ümumi pointerEvents-i sıra rəqibdə olduqda bloklamaq daha məntiqlidir
+        boardElement.style.pointerEvents = (gameIsOver || !isMyTurn) ? 'none' : 'auto';
 
         // console.log("[UI Render 2.1] updateBoardUI: Lövhə UI yeniləndi.");
     };
@@ -385,69 +372,59 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
      * Bu funksiya serverdən gameState gəldikdə çağırılmalıdır.
      */
     function updatePlayerInfo() {
-        console.log(`[UI Render 2.2] updatePlayerInfo çağırıldı. P1=${currentPlayerName}(${player1Symbol}), P2=${opponentPlayerName}(${player2Symbol})`);
+        // console.log(`[UI Render 2.2] updatePlayerInfo çağırıldı.`);
         if (!playerXInfo || !playerOInfo || !playerXSymbolDisplay || !playerOSymbolDisplay || !playerXNameDisplay || !playerONameDisplay) {
              console.warn("[UI Render 2.2] updatePlayerInfo: Bəzi oyunçu məlumat elementləri tapılmadı.");
              return;
         }
 
-        // Serverdən gələn `currentGameState`-ə əsasən dəyərləri təyin etməliyik.
-        // Hələlik qlobal dəyişənləri istifadə edirik, amma bunlar `game_state_update` handler-ində yenilənəcək.
-        const p1Sym = currentGameState.player1Symbol || '?'; // Player 1 həmişə bizik deyə fərz edək? Yox, server ID-yə görə təyin edir.
-        const p2Sym = currentGameState.player2Symbol || '?';
-        const p1Name = currentGameState.player1Username || "Oyunçu 1";
-        const p2Name = currentGameState.player2Username || "Rəqib Gözlənilir..."; // Əgər null gələrsə
-        const currentTurnSymbol = currentGameState.currentPlayerSymbol;
-        const gameIsOver = currentGameState.isGameOver;
+        const state = currentGameState; // Ən son server state-ini istifadə et
 
-        // Client-in özünü müəyyən etməsi (Server ID göndərəcək)
+        // Oyunçuları və simvolları müəyyən et
         let mySymbol = '?';
         let opponentSymbol = '?';
-        let myName = currentPlayerName; // Default loggedInUser.nickname
-        let oppName = 'Rəqib';
+        let myName = loggedInUser?.nickname || 'Siz'; // Default
+        let oppName = 'Rəqib';          // Default
 
-        if (socket && currentGameState.player1SocketId === socket.id) {
-            mySymbol = currentGameState.player1Symbol || '?';
-            opponentSymbol = currentGameState.player2Symbol || '?';
-            myName = currentGameState.player1Username || myName;
-            oppName = currentGameState.player2Username || opponentPlayerName;
-        } else if (socket && currentGameState.player2SocketId === socket.id) {
-            mySymbol = currentGameState.player2Symbol || '?';
-            opponentSymbol = currentGameState.player1Symbol || '?';
-            myName = currentGameState.player2Username || myName;
-            oppName = currentGameState.player1Username || opponentPlayerName;
+        if (socket && state.player1SocketId === socket.id) {
+            mySymbol = state.player1Symbol || '?';
+            opponentSymbol = state.player2Symbol || '?';
+            myName = state.player1Username || myName;
+            oppName = state.player2Username || (state.player2SocketId ? opponentPlayerName : 'Gözlənilir...'); // Rəqib varsa adını göstər, yoxsa gözlə
+        } else if (socket && state.player2SocketId === socket.id) {
+            mySymbol = state.player2Symbol || '?';
+            opponentSymbol = state.player1Symbol || '?';
+            myName = state.player2Username || myName;
+            oppName = state.player1Username || opponentPlayerName;
         } else {
-            // Əgər socket ID-lər uyğun gəlmirsə (oyun başlamayıb və ya izləyici?)
-             // İlkin dəyərləri saxlayaq
-             myName = loggedInUser?.nickname || 'Siz';
-             oppName = currentGameState.player1Username === myName ? currentGameState.player2Username : currentGameState.player1Username;
-             oppName = oppName || 'Rəqib'; // Əgər hələ təyin olunmayıbsa
-             // Simvolları da ilkin saxlayaq
-             mySymbol = player1Symbol; // Bu qlobal dəyişənlər hələlik qalsın
-             opponentSymbol = player2Symbol;
-             console.warn(`[UI Render 2.2] updatePlayerInfo: Socket ID (${socket?.id}) gameState oyunçu ID-ləri ilə (${currentGameState.player1SocketId}, ${currentGameState.player2SocketId}) uyğun gəlmir. UI default göstərilir.`);
+            // İzləyici və ya qoşulma problemi? Yaxud AI oyunu hələ başlamayıb?
+             // İlkin məlumatları göstərək
+             mySymbol = state.player1SocketId ? state.player1Symbol : '?'; // Əgər P1 varsa, onun simvolu
+             opponentSymbol = state.player2SocketId ? state.player2Symbol : '?';
+             myName = state.player1SocketId ? (state.player1Username || 'Oyunçu 1') : myName;
+             oppName = state.player2SocketId ? (state.player2Username || 'Oyunçu 2') : oppName;
+             // console.warn(`[UI Render 2.2] updatePlayerInfo: Socket ID (${socket?.id}) oyunçu ID-ləri ilə (${state.player1SocketId}, ${state.player2SocketId}) uyğun gəlmir. UI default göstərilir.`);
         }
 
-
-        // Player 1 (Bu Client) - UI-də həmişə solda göstərildiyini fərz edirik
+        // Player X (Biz) - Solda
         playerXSymbolDisplay.textContent = mySymbol;
         playerXNameDisplay.textContent = escapeHtml(myName);
-        playerXInfo.className = `player-info ${mySymbol === 'X' ? 'player-x' : (mySymbol === 'O' ? 'player-o' : '')}`;
+        playerXInfo.className = `player-info player-${mySymbol}`; // player-X və ya player-O klası
 
-        // Player 2 (Rəqib / AI) - UI-də həmişə sağda
+        // Player O (Rəqib) - Sağda
         playerOSymbolDisplay.textContent = opponentSymbol;
         playerONameDisplay.textContent = escapeHtml(oppName);
-        playerOInfo.className = `player-info ${opponentSymbol === 'X' ? 'player-x' : (opponentSymbol === 'O' ? 'player-o' : '')}`;
+        playerOInfo.className = `player-info player-${opponentSymbol}`; // player-X və ya player-O klası
 
         // Aktiv sıranı göstər (əgər oyun bitməyibsə)
-        if (!gameIsOver) {
-            playerXInfo.classList.toggle('active-player', currentTurnSymbol === mySymbol);
-            playerOInfo.classList.toggle('active-player', currentTurnSymbol === opponentSymbol);
+        if (!state.isGameOver && state.currentPlayerSymbol) {
+            playerXInfo.classList.toggle('active-player', state.currentPlayerSymbol === mySymbol);
+            playerOInfo.classList.toggle('active-player', state.currentPlayerSymbol === opponentSymbol);
         } else {
             playerXInfo.classList.remove('active-player');
             playerOInfo.classList.remove('active-player');
         }
-         console.log(`[UI Render 2.2] updatePlayerInfo: UI yeniləndi. Mən=${myName}(${mySymbol}), Rəqib=${oppName}(${opponentSymbol}), Sıra=${currentTurnSymbol}`);
+         // console.log(`[UI Render 2.2] updatePlayerInfo: UI yeniləndi. Mən=${myName}(${mySymbol}), Rəqib=${oppName}(${opponentSymbol}), Sıra=${state.currentPlayerSymbol}`);
     };
 
     /**
@@ -455,7 +432,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
      */
     function updateTurnIndicator() {
         if (!turnIndicator) return;
-        console.log("[UI Render 2.2] updateTurnIndicator çağırıldı.");
+        // console.log("[UI Render 2.2] updateTurnIndicator çağırıldı.");
 
         const state = currentGameState; // Ən son server state-ini istifadə et
 
@@ -465,79 +442,79 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         }
 
         if (state.isGameOver) {
-            turnIndicator.textContent = state.winnerSymbol === 'draw' ? "Bərabərə!" : (state.statusMessage || 'Oyun Bitdi');
+            // Qalib varsa adını, yoxsa "Bərabərə" göstər
+            let winnerName = "Oyun Bitdi";
+            if(state.winnerSymbol === 'draw') {
+                winnerName = "Bərabərə!";
+            } else if (state.winnerSymbol === state.player1Symbol) {
+                 winnerName = `${escapeHtml(state.player1Username || 'Oyunçu 1')} Qazandı!`;
+            } else if (state.winnerSymbol === state.player2Symbol) {
+                 winnerName = `${escapeHtml(state.player2Username || 'Oyunçu 2')} Qazandı!`;
+            }
+            turnIndicator.textContent = winnerName;
         } else if (!state.currentPlayerSymbol) {
             // Oyun başlayıb amma sıra hələ təyin olunmayıb (zər, simvol mərhələsi)
             turnIndicator.textContent = state.statusMessage || 'Simvol Seçilir...';
         } else {
             // Oyun davam edir, sırası olanı göstər
-            let turnPlayerName = 'Rəqib'; // Default
-            if (state.currentPlayerSymbol === state.player1Symbol && state.player1Username) {
-                 turnPlayerName = state.player1Username;
-            } else if (state.currentPlayerSymbol === state.player2Symbol && state.player2Username) {
-                 turnPlayerName = state.player2Username;
-            } else {
-                 // Adlar hələ tam təyin olunmayıbsa, simvolu göstər
-                 turnPlayerName = state.currentPlayerSymbol;
+            let turnPlayerName = '';
+            if (state.currentPlayerSymbol === state.player1Symbol) {
+                 turnPlayerName = state.player1Username || 'Oyunçu 1';
+            } else if (state.currentPlayerSymbol === state.player2Symbol) {
+                 turnPlayerName = state.player2Username || 'Oyunçu 2';
             }
-            turnIndicator.textContent = `Sıra: ${escapeHtml(turnPlayerName)} (${state.currentPlayerSymbol})`;
+            // Əgər socket ID bizə aiddirsə "Sıra Sizdə" göstərək
+            let displayText = '';
+            if (socket && state.currentPlayerSymbol === (state.player1SocketId === socket.id ? state.player1Symbol : state.player2Symbol)) {
+                displayText = `Sıra Sizdə (${state.currentPlayerSymbol})`;
+            } else {
+                displayText = `Sıra: ${escapeHtml(turnPlayerName)} (${state.currentPlayerSymbol})`;
+            }
+             turnIndicator.textContent = displayText;
         }
-         console.log(`[UI Render 2.2] updateTurnIndicator: Göstərici yeniləndi -> "${turnIndicator.textContent}"`);
+         // console.log(`[UI Render 2.2] updateTurnIndicator: Göstərici yeniləndi -> "${turnIndicator.textContent}"`);
 
-        // updatePlayerInfo() burada çağırılmır, çünki o, gameState dəyişəndə onsuz da çağırılacaq.
     };
 
     /**
      * Başlıqdakı düymələrin görünüşünü serverdən gələn və lokal vəziyyətə görə yeniləyir.
-     * Bu funksiya isCurrentUserCreator, isOpponentPresent, isPlayingAgainstAI kimi
-     * dəyişənlərin düzgün təyin olunmasını tələb edir.
      */
     function updateHeaderButtonsVisibility() {
-        // Bu funksiyanın məntiqi əvvəlki cavabda düzəldilmişdi, onu saxlayırıq.
-        // Sadəcə qlobal dəyişənləri (isCurrentUserCreator, isOpponentPresent, isPlayingAgainstAI)
-        // serverdən gələn məlumatlarla (xüsusilə room_info) düzgün təyin etmək lazımdır.
+        // Bu funksiya qlobal dəyişənlərə əsaslanır: isCurrentUserCreator, isPlayingAgainstAI, isOpponentPresent
+        // Bu dəyişənlər initializeGame, socket event handlers (room_info, opponent_left_game),
+        // və handleCallSnow/handleRemoveSnow tərəfindən yenilənməlidir.
 
-        console.log(`[UI Render 2.2] updateHeaderButtonsVisibility çağırıldı. isAI=${isPlayingAgainstAI}, isCreator=${isCurrentUserCreator}, isOpponent=${isOpponentPresent}`);
+        // console.log(`[UI Render 2.2] updateHeaderButtonsVisibility çağırıldı. isAI=${isPlayingAgainstAI}, isCreator=${isCurrentUserCreator}, isOpponent=${isOpponentPresent}`);
 
         // Otaq Ayarları (yalnız yaradan, AI olmayan oyunda)
-        const showEdit = !isPlayingAgainstAI && isCurrentUserCreator;
+        const showEdit = isCurrentUserCreator && !isPlayingAgainstAI;
         // Rəqibi Çıxart (yalnız yaradan, real rəqib varsa, AI olmayan oyunda)
-        const showKick = !isPlayingAgainstAI && isCurrentUserCreator && isOpponentPresent;
+        const showKick = isCurrentUserCreator && !isPlayingAgainstAI && isOpponentPresent;
         // SNOW'u Çağır (yalnız yaradan, rəqib yoxdursa, AI olmayan oyunda)
-        const showCallSnow = isCurrentUserCreator && !isOpponentPresent && !isPlayingAgainstAI;
+        const showCallSnow = isCurrentUserCreator && !isPlayingAgainstAI && !isOpponentPresent;
         // SNOW'u Çıxart (yalnız yaradan, AI ilə oynayarkən)
         const showRemoveSnow = isCurrentUserCreator && isPlayingAgainstAI;
 
+        // Elementlərin mövcudluğunu yoxlayaq
         if (editRoomBtn) editRoomBtn.style.display = showEdit ? 'inline-flex' : 'none'; else console.warn("[UI Render 2.2] editRoomBtn yoxdur");
         if (kickOpponentBtn) kickOpponentBtn.style.display = showKick ? 'inline-flex' : 'none'; else console.warn("[UI Render 2.2] kickOpponentBtn yoxdur");
         if (callSnowBtn) callSnowBtn.style.display = showCallSnow ? 'inline-flex' : 'none'; else console.warn("[UI Render 2.2] callSnowBtn yoxdur");
         if (removeSnowBtn) removeSnowBtn.style.display = showRemoveSnow ? 'inline-flex' : 'none'; else console.warn("[UI Render 2.2] removeSnowBtn yoxdur");
 
-        // Düymələri deaktiv etmək (görünmürsə)
-        if (callSnowBtn) callSnowBtn.disabled = !showCallSnow;
-        if (removeSnowBtn) removeSnowBtn.disabled = !showRemoveSnow;
+        // Deaktiv etmə (görünməyən düyməni deaktiv etməyə ehtiyac yoxdur)
+        // if (callSnowBtn) callSnowBtn.disabled = !showCallSnow;
+        // if (removeSnowBtn) removeSnowBtn.disabled = !showRemoveSnow;
 
-        console.log(`[UI Render 2.2] Düymə görünüşləri: Edit=${showEdit}, Kick=${showKick}, CallSnow=${showCallSnow}, RemoveSnow=${showRemoveSnow}`);
+        // console.log(`[UI Render 2.2] Düymə görünüşləri: Edit=${showEdit}, Kick=${showKick}, CallSnow=${showCallSnow}, RemoveSnow=${showRemoveSnow}`);
     };
 
 
 // --- Hissə 2.2 Sonu ---
 // ------------------------------------------------------------------------
-// ========================================================================
-// public/OYUNLAR/tictactoe/game/oda_ici.js
-// Yenidən Qurulmuş v1 (Server-Mərkəzli Vəziyyətə Uyğunlaşdırılır)
-// ========================================================================
-
-// ... (Əvvəlki hissələrdən kodlar buradadır) ...
-
-// document.addEventListener('DOMContentLoaded', () => {
-//     ... (Part 1, 2.1, 2.2-dən kodlar) ...
-
-    // ------------------------------------------------------------------------
-    // --- Part 2.3: UI Rendering - Oyun Statusu və Modal Pəncərələr ---
-    // ------------------------------------------------------------------------
-    // Qeyd: Serverdən gələn gameState-ə əsasən əsas status mesajını
-    // yeniləyən və zər atma/simvol seçmə modallarını göstərib/gizlədən funksiya.
+// --- Part 2.3: UI Rendering - Oyun Statusu və Modal Pəncərələr ---
+// ------------------------------------------------------------------------
+// Qeyd: Serverdən gələn gameState-ə əsasən əsas status mesajını
+// yeniləyən və zər atma/simvol seçmə modallarını göstərib/gizlədən funksiya.
 
     /**
      * Serverdən gələn vəziyyətə uyğun olaraq oyun statusu mesajını və
@@ -545,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
      * @param {object} state - Serverdən gələn `gameState` obyekti.
      */
     function updateGameStatusAndModals(state) {
-        console.log(`[UI Render 2.3] updateGameStatusAndModals çağırıldı. Status: "${state?.statusMessage}"`);
+        // console.log(`[UI Render 2.3] updateGameStatusAndModals çağırıldı. Status: "${state?.statusMessage}"`);
         if (!state) {
             console.warn("[UI Render 2.3] updateGameStatusAndModals: Boş state obyekti alındı.");
             if (gameStatusDisplay) gameStatusDisplay.textContent = "Serverdən məlumat gözlənilir...";
@@ -557,50 +534,88 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         // --- Əsas Status Mesajını Yenilə ---
         if (gameStatusDisplay) {
             // Serverdən gələn status mesajını göstər
-            gameStatusDisplay.textContent = state.statusMessage || '';
+            // Turn Indicator onsuz da qalib/bərabərə mesajını göstərir, statusu daha informativ edək
+            if (state.isGameOver) {
+                gameStatusDisplay.textContent = state.statusMessage || "Oyun Bitdi";
+            } else {
+                gameStatusDisplay.textContent = state.statusMessage || "Oyun Davam Edir";
+            }
+
             // Qazanma/Bərabərlik klaslarını tətbiq et
             gameStatusDisplay.className = 'game-status'; // Əvvəlcə təmizlə
             if (state.winnerSymbol && state.winnerSymbol !== 'draw') {
                 gameStatusDisplay.classList.add('win');
             } else if (state.winnerSymbol === 'draw') {
                 gameStatusDisplay.classList.add('draw');
+            } else if (!state.player1SocketId || !state.player2SocketId) {
+                gameStatusDisplay.classList.add('waiting'); // Rəqib gözləyirsə
             }
         }
 
         // --- Zər Atma Modalı ---
-        // Server statusu "Zər Atılır..." və ya "Bərabərlik!" kimi bir şeydirsə göstər
-        const showDiceModalCondition = state.statusMessage?.includes("Zər Atılır") || state.statusMessage?.includes("Bərabərlik!");
-        if (showDiceModalCondition && !state.isGameOver && state.player1Symbol === null) { // Oyun başlamayıbsa və simvol seçilməyibsə
+        // Server statusu "Zər Atılır..." və ya "Bərabərlik!" kimi bir şeydirsə və simvollar təyin olunmayıbsa göstər
+        const showDiceModalCondition = (state.statusMessage?.includes("Zər Atılır") || state.statusMessage?.includes("Bərabərlik!"))
+                                       && state.player1Symbol === null && state.player2Symbol === null;
+        if (showDiceModalCondition && !state.isGameOver) { // Oyun başlamayıbsa
              console.log("[UI Render 2.3] Zər atma modalı göstərilir/yenilənir.");
              if (diceInstructions) {
                 // Mesajı serverin statusuna uyğunlaşdır
                  if(state.statusMessage?.includes("Bərabərlik!")) {
                     diceInstructions.textContent = 'Bərabərlik! Təkrar atmaq üçün zərə klikləyin.';
-                 } else if (state.player1Roll !== null && state.player2Roll === null) {
-                     diceInstructions.textContent = 'Rəqibin zər atması gözlənilir...';
-                 } else if (state.player1Roll === null && state.player2Roll !== null) {
-                     diceInstructions.textContent = 'Zər atmaq növbəsi sizdədir...'; // Və ya sadəcə server statusu
                  } else {
-                     diceInstructions.textContent = state.statusMessage || 'Zər atın...';
+                    // Sıranın kimdə olduğunu yoxla
+                    const mySockId = socket?.id;
+                    const amIPlayer1 = mySockId === state.player1SocketId;
+                    const amIPlayer2 = mySockId === state.player2SocketId;
+                    let instructionText = state.statusMessage || 'Zər atın...'; // Default
+
+                    if(amIPlayer1 && state.player1Roll === null && state.player2Roll !== null){
+                         instructionText = 'Zər atmaq növbəsi sizdədir...';
+                    } else if (amIPlayer1 && state.player1Roll !== null && state.player2Roll === null){
+                        instructionText = 'Rəqibin zər atması gözlənilir...';
+                    } else if (amIPlayer2 && state.player2Roll === null && state.player1Roll !== null){
+                        instructionText = 'Zər atmaq növbəsi sizdədir...';
+                    } else if (amIPlayer2 && state.player2Roll !== null && state.player1Roll === null){
+                         instructionText = 'Rəqibin zər atması gözlənilir...';
+                    } else if (state.player1Roll === null && state.player2Roll === null) {
+                         instructionText = 'İlk zəri atmaq üçün klikləyin...';
+                    }
+                    diceInstructions.textContent = instructionText;
                  }
                  // Stil klaslarını da təyin et (əgər lazımdırsa)
                  diceInstructions.className = 'instructions'; // Standart
                  if(state.statusMessage?.includes("Bərabərlik!")) diceInstructions.classList.add('waiting'); // Və ya başqa bir klas
+                 else if(diceInstructions.textContent.includes("gözlənilir")) diceInstructions.classList.add('waiting');
              }
-             // Nəticələri yenilə
-             if (yourRollResultDisplay) yourRollResultDisplay.textContent = state.player1Roll !== null ? state.player1Roll : '?';
-             if (opponentRollResultDisplay) opponentRollResultDisplay.textContent = state.player2Roll !== null ? state.player2Roll : '?';
-             // Qutu stillərini yenilə (bərabərlik üçün)
-             if(yourRollBox) yourRollBox.classList.toggle('tie', state.statusMessage?.includes("Bərabərlik!"));
-             if(opponentRollBox) opponentRollBox.classList.toggle('tie', state.statusMessage?.includes("Bərabərlik!"));
-             if(yourRollBox) yourRollBox.classList.remove('winner'); // Qalib stilini təmizlə
-             if(opponentRollBox) opponentRollBox.classList.remove('winner');
+             // Nəticələri yenilə (kimin P1/P2 olduğuna görə)
+             const mySockId = socket?.id;
+             const myRoll = (mySockId === state.player1SocketId) ? state.player1Roll : state.player2Roll;
+             const oppRoll = (mySockId === state.player1SocketId) ? state.player2Roll : state.player1Roll;
+
+             if (yourRollResultDisplay) yourRollResultDisplay.textContent = myRoll !== null ? myRoll : '?';
+             if (opponentRollResultDisplay) opponentRollResultDisplay.textContent = oppRoll !== null ? oppRoll : '?';
+
+             // Qutu stillərini yenilə (bərabərlik/qalib üçün)
+             const isTie = state.statusMessage?.includes("Bərabərlik!");
+             if(yourRollBox) yourRollBox.classList.toggle('tie', isTie);
+             if(opponentRollBox) opponentRollBox.classList.toggle('tie', isTie);
+             // Qalib stilini (əgər bərabərlik yoxdursa və nəticələr varsa)
+             if(!isTie && myRoll !== null && oppRoll !== null) {
+                 if(yourRollBox) yourRollBox.classList.toggle('winner', myRoll > oppRoll);
+                 if(opponentRollBox) opponentRollBox.classList.toggle('winner', oppRoll > myRoll);
+             } else {
+                 if(yourRollBox) yourRollBox.classList.remove('winner');
+                 if(opponentRollBox) opponentRollBox.classList.remove('winner');
+             }
+
              // Zəri kliklənə bilən et (əgər sıra bizdədirsə və ya bərabərlikdirsə)
-             const canRoll = (state.player1SocketId === socket.id && state.player1Roll === null) ||
-                           (state.player2SocketId === socket.id && state.player2Roll === null) ||
-                           (state.statusMessage?.includes("Bərabərlik!"));
+             const canRoll = !isDiceRolling && (
+                            (mySockId === state.player1SocketId && state.player1Roll === null) ||
+                            (mySockId === state.player2SocketId && state.player2Roll === null) ||
+                            isTie );
              if(diceCubeElement) diceCubeElement.style.cursor = canRoll ? 'grab' : 'not-allowed';
-             initDice(); // Zərin vizual vəziyyətini sıfırla (animasiya olubsa)
+
+             // initDice(); // Zərin vizual vəziyyətini sıfırla (animasiya olubsa) - Bunu rollDice içində edək
              showModal(diceRollModal);
         } else {
             // Zər atma mərhələsi deyilsə, modalı gizlət
@@ -608,24 +623,32 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         }
 
         // --- Simvol Seçmə Modalı ---
-        // Server statusu "Simvol seçimi..." kimi bir şeydirsə və simvol seçici biziksə göstər
-        const showSymbolModalCondition = state.statusMessage?.includes("Simvol seçimi") || state.statusMessage?.includes("Simvol seçin");
-        if (showSymbolModalCondition && !state.isGameOver && state.player1Symbol === null) { // Oyun başlamayıbsa və simvol seçilməyibsə
+        // Server statusu "Simvol seçimi..." kimi bir şeydirsə və simvollar təyin olunmayıbsa göstər
+        const showSymbolModalCondition = state.statusMessage?.includes("Simvol seç")
+                                         && state.player1Symbol === null && state.player2Symbol === null;
+        if (showSymbolModalCondition && !state.isGameOver) {
              console.log("[UI Render 2.3] Simvol seçmə modalı göstərilir/yenilənir.");
              const amIPicker = socket && state.symbolPickerSocketId === socket.id;
              if (symbolSelectTitle) symbolSelectTitle.textContent = amIPicker ? "Simvol Seçin" : "Simvol Seçilir";
              if (symbolSelectMessage) symbolSelectMessage.textContent = amIPicker
                  ? "Oyuna başlamaq üçün simvolunuzu seçin:"
-                 : `${state.diceWinnerSocketId === state.player1SocketId ? state.player1Username : state.player2Username} simvol seçir...`;
+                 : `${state.diceWinnerSocketId === state.player1SocketId ? (state.player1Username || 'Oyunçu 1') : (state.player2Username || 'Oyunçu 2')} simvol seçir...`;
 
              if (symbolOptionsDiv) {
                  symbolOptionsDiv.style.display = amIPicker ? 'flex' : 'none';
                  // Əgər biz seçiriksə, listenerları əlavə et (əvvəl silib sonra əlavə etmək daha etibarlıdır)
                  if (amIPicker) {
                      symbolOptionsDiv.querySelectorAll('.symbol-button').forEach(button => {
-                         const newButton = button.cloneNode(true);
-                         button.parentNode.replaceChild(newButton, button);
-                         newButton.addEventListener('click', handleSymbolChoice);
+                         // Effektivlik üçün: listener onsuz da handleSymbolChoice olaraq təyin edilib, təkrar əlavə etməyək
+                         // Yalnız düyməni aktiv/deaktiv edək? Ya da olduğu kimi qalsın.
+                         // const newButton = button.cloneNode(true); // Klonlama lazım deyil
+                         // button.parentNode.replaceChild(newButton, button);
+                         // newButton.addEventListener('click', handleSymbolChoice);
+                         button.disabled = false; // Aktiv edək
+                     });
+                 } else {
+                      symbolOptionsDiv.querySelectorAll('.symbol-button').forEach(button => {
+                         button.disabled = true; // Deaktiv edək
                      });
                  }
              }
@@ -663,16 +686,17 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
      */
     function triggerShatterEffect(winnerMark) {
         console.log(`[Effects 2.4] triggerShatterEffect çağırıldı. Qalib: ${winnerMark}`);
-        if (!fireworksOverlay || !shatteringTextContainer || !winnerMark) {
-            console.warn("[Effects 2.4] triggerShatterEffect: Effekt elementləri tapılmadı və ya qalib simvolu yoxdur.");
+        if (!fireworksOverlay || !shatteringTextContainer || !winnerMark || winnerMark === 'draw') {
+            console.warn("[Effects 2.4] triggerShatterEffect: Effekt elementləri tapılmadı, qalib simvolu yoxdur və ya bərabərlikdir.");
             return;
         }
         clearShatteringText(); // Əvvəlki effekti təmizlə
 
         // Qalibə uyğun mətni server state-dən alaq
-        const winnerName = (winnerMark === currentGameState.player1Symbol) ? currentGameState.player1Username : currentGameState.player2Username;
+        const state = currentGameState;
+        const winnerName = (winnerMark === state.player1Symbol) ? state.player1Username : state.player2Username;
         // Clientin özünün qalib olub olmadığını yoxlayaq
-        const isClientWinner = (socket && winnerMark === (currentGameState.player1SocketId === socket.id ? currentGameState.player1Symbol : currentGameState.player2Symbol));
+        const isClientWinner = (socket && winnerMark === (state.player1SocketId === socket.id ? state.player1Symbol : state.player2Symbol));
 
         const text = isClientWinner ? "Siz Qazandınız!" : `${escapeHtml(winnerName || winnerMark)} Qazandı!`;
         const chars = text.split('');
@@ -751,7 +775,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
 // ... (Əvvəlki hissələrdən kodlar buradadır) ...
 
 // document.addEventListener('DOMContentLoaded', () => {
-//     ... (Part 1 və 2-dən kodlar) ...
+//     ... (Part 1, 2-dən kodlar) ...
 
     // ------------------------------------------------------------------------
     // --- Part 3.1: Client Əməliyyatları - Xanaya Klikləmə ---
@@ -765,49 +789,44 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
      * @param {Event} event - Klik hadisəsi obyekti.
      */
     function handleCellClick(event) {
-        console.log("[Client Action 3.1] handleCellClick çağırıldı.");
+        // console.log("[Client Action 3.1] handleCellClick çağırıldı.");
         const clickedCell = event.target;
         const index = parseInt(clickedCell.dataset.index);
 
         // --- Client Tərəfi İlkin Yoxlamalar ---
-        // Server onsuz da yoxlayacaq, amma clientdə də ilkin yoxlama etmək UI təcrübəsini yaxşılaşdırır.
-
-        // Oyun vəziyyəti serverdən gələn `currentGameState`-dən oxunur
         if (!currentGameState || Object.keys(currentGameState).length === 0) {
             console.warn("[Client Action 3.1] handleCellClick: currentGameState hələ mövcud deyil.");
-            // Bəlkə istifadəçiyə mesaj göstərək?
-            // alert("Oyun vəziyyəti hələ serverdən alınmayıb. Bir az gözləyin.");
             return;
         }
 
-        // Oyun bitibsə və ya zər atılırsa, klikləməyə icazə vermə
-        if (currentGameState.isGameOver || isDiceRolling) { // isDiceRolling hələ də client tərəfli UI state-dir
-            console.log(`[Client Action 3.1] handleCellClick: Klik bloklandı (Oyun bitib: ${currentGameState.isGameOver}, Zər atılır: ${isDiceRolling})`);
+        // Oyun bitibsə, zər atılırsa, klikləməyə icazə vermə
+        if (currentGameState.isGameOver || isDiceRolling) {
+            // console.log(`[Client Action 3.1] handleCellClick: Klik bloklandı (Oyun bitib: ${currentGameState.isGameOver}, Zər atılır: ${isDiceRolling})`);
             return;
         }
 
         // Sıranın bizdə olub olmadığını yoxla
         let myTurn = false;
-        if (socket && currentGameState.currentPlayerSymbol) {
-             if (currentGameState.player1SocketId === socket.id && currentGameState.currentPlayerSymbol === currentGameState.player1Symbol) {
+        const mySockId = socket?.id;
+        if (mySockId && currentGameState.currentPlayerSymbol) {
+             if (currentGameState.player1SocketId === mySockId && currentGameState.currentPlayerSymbol === currentGameState.player1Symbol) {
                  myTurn = true;
-             } else if (currentGameState.player2SocketId === socket.id && currentGameState.currentPlayerSymbol === currentGameState.player2Symbol) {
+             } else if (currentGameState.player2SocketId === mySockId && currentGameState.currentPlayerSymbol === currentGameState.player2Symbol) {
                  myTurn = true;
              }
         }
         if (!myTurn) {
-            console.log("[Client Action 3.1] handleCellClick: Klik bloklandı (Sıra sizdə deyil).");
-            // İstifadəçiyə bildirmək olar, amma server onsuz da invalid_move göndərəcək.
+            // console.log("[Client Action 3.1] handleCellClick: Klik bloklandı (Sıra sizdə deyil).");
             return;
         }
 
-        // Hüceyrənin boş olub olmadığını yoxla (serverdən gələn state-ə əsasən)
+        // Hüceyrənin boş olub olmadığını yoxla
         if (currentGameState.board[index] !== '') {
-            console.log(`[Client Action 3.1] handleCellClick: Klik bloklandı (Xana ${index} boş deyil: "${currentGameState.board[index]}").`);
+            // console.log(`[Client Action 3.1] handleCellClick: Klik bloklandı (Xana ${index} boş deyil: "${currentGameState.board[index]}").`);
             return;
         }
 
-        // Təkrarlanan göndərmələrin qarşısını al (optional)
+        // Təkrarlanan göndərmələrin qarşısını al
         if (isProcessingMove) {
             console.warn("[Client Action 3.1] handleCellClick: Əvvəlki hərəkət hələ də emal edilir.");
             return;
@@ -817,25 +836,21 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         if (socket && socket.connected) {
             console.log(`[Client Action 3.1] Serverə 'make_move' göndərilir. Index: ${index}`);
             isProcessingMove = true; // Emal başladığını qeyd et
+            // Lövhəni dərhal bloklayaq (server cavabına qədər)
+            if (boardElement) boardElement.style.pointerEvents = 'none';
+
             socket.emit('make_move', { index: index });
 
-            // Serverdən cavab (game_state_update və ya invalid_move) gözlənilir.
-            // Cavab gəldikdə isProcessingMove = false ediləcək (game_state_update handler-ində).
-            // Timeout əlavə etmək olar ki, serverdən cavab gəlməzsə, isProcessingMove sıfırlansın.
+            // Serverdən cavab (game_state_update) gözlənilir.
+            // Cavab gəldikdə isProcessingMove = false ediləcək və pointerEvents yenilənəcək.
+            // Timeout əlavə edək ki, serverdən cavab gəlməzsə, bloklama qaldırılsın.
             setTimeout(() => {
                  if(isProcessingMove) {
-                     console.warn("[Client Action 3.1] make_move cavabı üçün timeout. isProcessingMove sıfırlanır.");
+                     console.warn("[Client Action 3.1] make_move cavabı üçün timeout. isProcessingMove sıfırlanır, lövhə aktivləşdirilir.");
                      isProcessingMove = false;
+                      if (boardElement && !currentGameState.isGameOver) boardElement.style.pointerEvents = 'auto'; // Əgər oyun bitməyibsə
                  }
              }, 5000); // 5 saniyə
-
-            // Optimistik UI yeniləməsi? (Optional - Server cavabını gözləmədən xananı doldurmaq)
-            // Bu, interfeysi daha cəld göstərə bilər, amma server hərəkəti rədd etsə, geri almaq lazım gələcək.
-            // Hələlik bunu etməyək, server cavabını gözləyək.
-            // clickedCell.textContent = mySymbol; // Məsələn
-            // clickedCell.classList.add(mySymbol);
-            // clickedCell.style.cursor = 'not-allowed';
-
         } else {
             console.error("[Client Action 3.1] handleCellClick: Socket bağlantısı yoxdur!");
             alert("Serverlə bağlantı yoxdur. Hərəkət göndərilə bilmədi.");
@@ -860,60 +875,87 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     // Qeyd: İstifadəçi zərə kliklədikdə və ya sürükləyib buraxdıqda çağırılır.
     // Zər animasiyasını göstərir və nəticəni serverə göndərir.
 
+    /** Zərin vizual vəziyyətini (dönməsini) tətbiq edir */
+    function setDiceTransform(rotateX = currentDiceRotateX, rotateY = currentDiceRotateY, rotateZ = currentDiceRotateZ) {
+        if (diceCubeElement) {
+            diceCubeElement.style.transform = `translateZ(${initialCenterZ}px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) rotateZ(${rotateZ}deg)`;
+        }
+    }
+
+    /** Zərin ilkin vizual vəziyyətini və listenerlarını qurur */
+    function initDice() {
+        if (!diceCubeElement) return;
+        console.log("[Dice 3.2] initDice çağırıldı.");
+        diceCubeElement.style.transition = 'none'; // Animasiyanı söndür
+        // Başlanğıc vəziyyətini təyin et (məsələn, 1 üzü yuxarıda)
+        currentDiceRotateX = diceRotations[1].x;
+        currentDiceRotateY = diceRotations[1].y;
+        currentDiceRotateZ = 0;
+        setDiceTransform(); // İlkin vəziyyəti tətbiq et
+        isDiceRolling = false; // Animasiya getmir
+        // Kursu server state-inə görə updateGameStatusAndModals təyin edəcək
+        // diceCubeElement.style.cursor = 'grab';
+    }
+
     /**
      * Zər atma animasiyasını başladır və nəticəni serverə göndərir.
      */
     function rollDice() {
-        console.log("[Client Action 3.2] rollDice çağırıldı.");
+        // console.log("[Client Action 3.2] rollDice çağırıldı.");
 
         // --- Client Tərəfi Yoxlamalar ---
         if (!currentGameState || Object.keys(currentGameState).length === 0) { console.warn("[Client Action 3.2] rollDice: currentGameState yoxdur."); return; }
-        if (isDiceRolling) { console.log("[Client Action 3.2] rollDice: Artıq zər atılır."); return; }
+        if (isDiceRolling) { /*console.log("[Client Action 3.2] rollDice: Artıq zər atılır.");*/ return; }
         if (currentGameState.isGameOver || currentGameState.currentPlayerSymbol !== null) { console.warn("[Client Action 3.2] rollDice: Zər atmaq üçün uyğun olmayan oyun vəziyyəti."); return; }
 
         // Sıranın bizdə olub olmadığını (və ya bərabərlik olub olmadığını) yoxla
         let canIRoll = false;
         const mySockId = socket?.id;
+        const isTie = currentGameState.statusMessage?.includes("Bərabərlik!");
         if (mySockId) {
-             if ((currentGameState.player1SocketId === mySockId && currentGameState.player1Roll === null) ||
-                 (currentGameState.player2SocketId === mySockId && currentGameState.player2Roll === null) ||
-                 (currentGameState.player1Roll !== null && currentGameState.player2Roll !== null && currentGameState.player1Roll === currentGameState.player2Roll)) // Bərabərlik halı
-              {
+             if (isTie || // Bərabərlikdirsə həmişə ata bilərik
+                 (currentGameState.player1SocketId === mySockId && currentGameState.player1Roll === null) ||
+                 (currentGameState.player2SocketId === mySockId && currentGameState.player2Roll === null)
+                ) {
                  canIRoll = true;
               }
         }
 
         if (!canIRoll) {
-            console.log("[Client Action 3.2] rollDice: Zər atmaq növbəsi sizdə deyil və ya hər iki nəticə gözlənilir.");
+            // console.log("[Client Action 3.2] rollDice: Zər atmaq növbəsi sizdə deyil.");
             return;
         }
-        if (!diceCubeElement) { console.error("[Client Action 3.2] rollDice: diceCubeElement tapılmadı!"); return;}
+        if (!diceCubeElement || !diceInstructions) { console.error("[Client Action 3.2] rollDice: diceCubeElement və ya diceInstructions tapılmadı!"); return;}
 
         // --- Animasiya və Serverə Göndərmə ---
         isDiceRolling = true; // Animasiya başladığını qeyd et
         console.log("[Client Action 3.2] rollDice: Zər atılır...");
-        diceCubeElement.style.cursor = 'default';
-        // UI-də nəticələri sıfırla (əgər bərabərlik idisə)
-        if (yourRollResultDisplay) yourRollResultDisplay.textContent = '?';
-        // opponentRollResultDisplay burada sıfırlanmır, server state-dən gələcək
-        if(yourRollBox) yourRollBox.className = 'result-box';
-        if(opponentRollBox) opponentRollBox.className = 'result-box'; // Bərabərlik/Qalib stillərini sil
-        if(diceInstructions) diceInstructions.textContent = 'Zər atılır...';
+        diceCubeElement.style.cursor = 'default'; // Animasiya zamanı kursoru dəyiş
+        diceInstructions.textContent = 'Zər atılır...';
+        diceInstructions.className = 'instructions'; // Gözləmə/bərabərlik stilini sil
+        // Nəticə qutularını sıfırla (əgər bərabərlik idisə)
+        if(isTie){
+            if (yourRollResultDisplay) yourRollResultDisplay.textContent = '?';
+            if (opponentRollResultDisplay) opponentRollResultDisplay.textContent = '?';
+            if(yourRollBox) yourRollBox.className = 'result-box';
+            if(opponentRollBox) opponentRollBox.className = 'result-box';
+        }
 
         // Təsadüfi nəticəni yarat
         const myRoll = Math.floor(Math.random() * 6) + 1;
-        console.log(`[Client Action 3.2] rollDice: Atılan zər: ${myRoll}`);
+        // console.log(`[Client Action 3.2] rollDice: Atılan zər: ${myRoll}`);
 
         // Serverə nəticəni göndər
         if (socket && socket.connected) {
-             console.log(`[Client Action 3.2] Serverə 'dice_roll_result' göndərilir: { roll: ${myRoll} }`);
+             // console.log(`[Client Action 3.2] Serverə 'dice_roll_result' göndərilir: { roll: ${myRoll} }`);
              socket.emit('dice_roll_result', { roll: myRoll });
              // Cavabı game_state_update ilə gözləyirik
         } else {
             console.error("[Client Action 3.2] rollDice: Socket bağlantısı yoxdur!");
             alert("Serverlə bağlantı yoxdur. Zər nəticəsi göndərilə bilmədi.");
             isDiceRolling = false; // Animasiyanı ləğv et
-            if(diceInstructions) diceInstructions.textContent = 'Serverlə bağlantı xətası!';
+            diceInstructions.textContent = 'Serverlə bağlantı xətası!';
+            diceCubeElement.style.cursor = 'grab'; // Kursu geri qaytar
             return;
         }
 
@@ -926,60 +968,62 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
          } catch (e) { console.warn("CSS dəyişənləri alına bilmədi."); }
 
         const finalFace = diceRotations[myRoll];
-        const fullRotationsX = 360 * (2 + Math.floor(Math.random() * 2));
-        const fullRotationsY = 360 * (2 + Math.floor(Math.random() * 2));
-        const fullRotationsZ = 360 * (1 + Math.floor(Math.random() * 1));
+        // Daha realistik fırlanma üçün təsadüfi tam dövrələr
+        const fullRotationsX = 360 * (2 + Math.floor(Math.random() * 3)); // 2-4 arası tam dövrə
+        const fullRotationsY = 360 * (2 + Math.floor(Math.random() * 3));
+        const fullRotationsZ = 360 * (1 + Math.floor(Math.random() * 2)); // Z oxu ətrafında da fırlansın
         const targetRotateX = finalFace.x + fullRotationsX;
         const targetRotateY = finalFace.y + fullRotationsY;
-        const targetRotateZ = 0 + fullRotationsZ;
+        const targetRotateZ = 0 + fullRotationsZ; // Z oxu üçün 0 dərəcə hədəf
 
         diceCubeElement.style.transition = `transform ${rollDurationValue} ${rollTimingFunctionValue}`;
         setDiceTransform(targetRotateX, targetRotateY, targetRotateZ);
 
-        // Animasiya bitdikdən sonra isDiceRolling = false et (server cavabından asılı olmayaraq)
+        // Animasiya bitdikdən sonra
         setTimeout(() => {
-            console.log("[Client Action 3.2] rollDice: Lokal animasiya bitdi.");
-            isDiceRolling = false;
+            // console.log("[Client Action 3.2] rollDice: Lokal animasiya bitdi.");
+            isDiceRolling = false; // Animasiyanı bitir
             if (diceCubeElement) {
-                 diceCubeElement.style.transition = 'none';
-                 // Zərin son vəziyyətini saxla (vizual olaraq)
-                 currentDiceRotateX = finalFace.x; currentDiceRotateY = finalFace.y; currentDiceRotateZ = 0;
-                 setDiceTransform();
-                 // Kursu yenidən ayarla (server state-inə görə - bəlkə updateGameStatusAndModals-da?)
-                 // diceCubeElement.style.cursor = 'grab'; // Hələlik belə qalsın
+                 diceCubeElement.style.transition = 'none'; // Növbəti ani dəyişikliklər üçün
+                 // Zərin son vizual vəziyyətini saxla (tam dövrələrsiz)
+                 currentDiceRotateX = finalFace.x;
+                 currentDiceRotateY = finalFace.y;
+                 currentDiceRotateZ = 0; // Z-ni sıfırla
+                 setDiceTransform(); // Son vəziyyətə gətir
+                 // Kurs server state-i gəldikdən sonra yenilənəcək (updateGameStatusAndModals tərəfindən)
+                 // diceCubeElement.style.cursor = 'grab';
             }
             // Nəticəni serverdən gələn update göstərəcək, burada göstərməyək.
-            // if(yourRollResultDisplay) yourRollResultDisplay.textContent = myRoll;
             // Serverdən gələn statusu gözləyək...
-            // if(diceInstructions && diceInstructions.textContent === 'Zər atılır...') {
-            //     diceInstructions.textContent = 'Nəticə serverə göndərildi...';
-            // }
+            if(diceInstructions.textContent === 'Zər atılır...') {
+                 diceInstructions.textContent = 'Rəqib gözlənilir...'; // Və ya serverin göndərəcəyi status
+                 diceInstructions.classList.add('waiting');
+            }
 
-        }, parseFloat(rollDurationValue.replace('s', '')) * 1000 + 100);
+        }, parseFloat(rollDurationValue.replace('s', '')) * 1000 + 50); // Animasiya + kiçik bufer
     }
 
-    // Zər sürükləmə/klikləmə listenerları bu `rollDice` funksiyasını çağıracaq
-    // (handleMouseDown, handleMouseMove, handleMouseUp, handleTouchStart, handleTouchMove, handleTouchEnd)
-    // Bu listenerların kodu dəyişməz qaldığı üçün buraya təkrar əlavə etmirəm (Hissə 3.3 idi əvvəlki planda)
-    // Onların sadəcə `rollDice()` çağırması kifayətdir.
+    // --- Zər Sürükləmə/Klikləmə Hadisələri ---
+    function handleMouseDown(event) { if (event.button !== 0) return; isDragging = true; dragStartX = event.clientX; dragStartY = event.clientY; previousMouseX = event.clientX; previousMouseY = event.clientY; if(diceCubeElement) diceCubeElement.style.cursor = 'grabbing'; }
+    function handleMouseMove(event) { if (!isDragging) return; const dx = event.clientX - previousMouseX; const dy = event.clientY - previousMouseY; currentDiceRotateY += dx * rotateSensitivity; currentDiceRotateX -= dy * rotateSensitivity; setDiceTransform(); previousMouseX = event.clientX; previousMouseY = event.clientY; }
+    function handleMouseUp(event) { if (event.button !== 0 || !isDragging) return; isDragging = false; const dragDistance = Math.sqrt(Math.pow(event.clientX-dragStartX, 2) + Math.pow(event.clientY-dragStartY, 2)); if (dragDistance < dragThreshold) { rollDice(); } if(diceCubeElement) diceCubeElement.style.cursor = 'grab'; }
+    function handleTouchStart(event) { if (event.touches.length !== 1) return; event.preventDefault(); isDragging = true; const touch = event.touches[0]; dragStartX = touch.clientX; dragStartY = touch.clientY; previousMouseX = touch.clientX; previousMouseY = touch.clientY; }
+    function handleTouchMove(event) { if (!isDragging || event.touches.length !== 1) return; event.preventDefault(); const touch = event.touches[0]; const dx = touch.clientX - previousMouseX; const dy = touch.clientY - previousMouseY; currentDiceRotateY += dx * rotateSensitivity; currentDiceRotateX -= dy * rotateSensitivity; setDiceTransform(); previousMouseX = touch.clientX; previousMouseY = touch.clientY; }
+    function handleTouchEnd(event) { if (!isDragging) return; event.preventDefault(); isDragging = false; const touch = event.changedTouches[0]; const dragDistance = Math.sqrt(Math.pow(touch.clientX-dragStartX, 2) + Math.pow(touch.clientY-dragStartY, 2)); if (dragDistance < dragThreshold) { rollDice(); } }
+
+    // Qlobal mouse/touch listenerları (sürükləmə üçün)
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
+
 
 // --- Hissə 3.2 Sonu ---
 // ------------------------------------------------------------------------
-// ========================================================================
-// public/OYUNLAR/tictactoe/game/oda_ici.js
-// Yenidən Qurulmuş v1 (Server-Mərkəzli Vəziyyətə Uyğunlaşdırılır)
-// ========================================================================
-
-// ... (Əvvəlki hissələrdən kodlar buradadır) ...
-
-// document.addEventListener('DOMContentLoaded', () => {
-//     ... (Part 1, 2, 3.1, 3.2-dən kodlar) ...
-
-    // ------------------------------------------------------------------------
-    // --- Part 3.3: Client Əməliyyatları - Simvol Seçimi ---
-    // ------------------------------------------------------------------------
-    // Qeyd: İstifadəçi simvol seçmə modalında 'X' və ya 'O' düyməsinə
-    // kliklədikdə çağırılır. Seçimi serverə göndərir.
+// --- Part 3.3: Client Əməliyyatları - Simvol Seçimi ---
+// ------------------------------------------------------------------------
+// Qeyd: İstifadəçi simvol seçmə modalında 'X' və ya 'O' düyməsinə
+// kliklədikdə çağırılır. Seçimi serverə göndərir.
 
     /**
      * Simvol seçmə düyməsinə kliklənəndə çağırılır.
@@ -987,7 +1031,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
      * @param {Event} event - Klik hadisəsi obyekti.
      */
     function handleSymbolChoice(event) {
-        console.log("[Client Action 3.3] handleSymbolChoice çağırıldı.");
+        // console.log("[Client Action 3.3] handleSymbolChoice çağırıldı.");
         const clickedButton = event.target;
         const chosenSymbol = clickedButton.dataset.symbol;
 
@@ -1000,14 +1044,13 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             console.warn("[Client Action 3.3] handleSymbolChoice: currentGameState hələ mövcud deyil.");
             return;
         }
-        // Server onsuz da yoxlayacaq, amma əminlik üçün: Sıra bizdədirmi?
+        // Sıranın bizdə olub olmadığını yoxla
         if (socket && currentGameState.symbolPickerSocketId !== socket.id) {
              console.warn(`[Client Action 3.3] handleSymbolChoice: Simvol seçmə növbəsi bizdə (${socket.id}) deyil. Seçən olmalı idi: ${currentGameState.symbolPickerSocketId}`);
-             // UI səhvi ola bilər ki, düymələr aktiv qalıb. Modalı gizlədək.
-             hideModal(symbolSelectModal);
+             hideModal(symbolSelectModal); // UI səhvi ola bilər, modalı gizlədək.
              return;
         }
-        // Simvollar artıq seçilibmi? (Yenə də server yoxlayacaq)
+        // Simvollar artıq seçilibmi?
         if (currentGameState.player1Symbol !== null || currentGameState.player2Symbol !== null) {
              console.warn("[Client Action 3.3] handleSymbolChoice: Simvollar artıq seçilib.");
              hideModal(symbolSelectModal);
@@ -1020,10 +1063,11 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             socket.emit('symbol_choice', { symbol: chosenSymbol });
 
             // Cavabı game_state_update ilə gözləyirik.
-            // Modal avtomatik olaraq updateGameStatusAndModals tərəfindən gizlədiləcək.
-            // hideModal(symbolSelectModal); // Burada gizlətməyək, server cavabını gözləyək.
-            // Statusu lokal olaraq dəyişək? Yox, serverdən gəlsin.
-            // if(symbolSelectMessage) symbolSelectMessage.textContent = "Seçim göndərildi...";
+            // Statusu lokal olaraq dəyişək?
+            if(symbolSelectMessage) symbolSelectMessage.textContent = "Seçim göndərildi...";
+            if(symbolOptionsDiv) symbolOptionsDiv.style.display = 'none';
+            if(symbolWaitingMessage) symbolWaitingMessage.style.display = 'block';
+            clickedButton.disabled = true; // Təkrar klikləmənin qarşısını al
 
         } else {
             console.error("[Client Action 3.3] handleSymbolChoice: Socket bağlantısı yoxdur!");
@@ -1052,10 +1096,9 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     /**
      * Yenidən başlatma düyməsinə kliklənəndə çağırılır.
      * Lazımi yoxlamaları edir və serverə 'request_restart' hadisəsini göndərir.
-     * @param {boolean} accepted - Bu parametr artıq istifadə edilmir (əvvəlki logikadan qalıb).
      */
-    function handleRestartGame(accepted = false) { // 'accepted' parametrini artıq nəzərə almırıq
-        console.log(`[Client Action 3.4] handleRestartGame çağırıldı.`);
+    function handleRestartGame() {
+        // console.log(`[Client Action 3.4] handleRestartGame çağırıldı.`);
 
         // --- Client Tərəfi Yoxlamalar ---
          if (!currentGameState || Object.keys(currentGameState).length === 0) {
@@ -1064,36 +1107,31 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
          }
          // Yalnız oyun bitibsə restart təklif etmək olar
          if (!currentGameState.isGameOver) {
-             console.log("[Client Action 3.4] handleRestartGame: Oyun hələ bitməyib.");
-             alert("Yenidən başlatmaq üçün oyunun bitməsini gözləyin.");
-             return;
+             // console.log("[Client Action 3.4] handleRestartGame: Oyun hələ bitməyib.");
+             // alert("Yenidən başlatmaq üçün oyunun bitməsini gözləyin.");
+             return; // Səssizcə çıxaq
          }
-         // Rəqib varmı? (AI olmayan oyun üçün)
-         const isMultiplayer = !isPlayingAgainstAI; // isPlayingAgainstAI hələlik lokal idarə olunur
-         const opponentExists = currentGameState.player1SocketId && currentGameState.player2SocketId;
-         if (isMultiplayer && !opponentExists) {
-             console.log("[Client Action 3.4] handleRestartGame: Multiplayer oyunudur amma rəqib yoxdur.");
-             alert("Yenidən başlatmaq üçün rəqibin qoşulmasını gözləyin.");
+         // Rəqib varmı? (AI olmayan oyun üçün) - isPlayingAgainstAI hələlik lokal idarə olunur
+         const opponentExists = !!(currentGameState.player1SocketId && currentGameState.player2SocketId && currentGameState.player2SocketId !== 'AI_SNOW');
+         if (!isPlayingAgainstAI && !opponentExists) {
+             // console.log("[Client Action 3.4] handleRestartGame: Multiplayer oyunudur amma rəqib yoxdur.");
+             // alert("Yenidən başlatmaq üçün rəqibin qoşulmasını gözləyin.");
+             return; // Səssizcə çıxaq
+         }
+
+         // Təklif artıq göndərilibsə (və ya rəqib göndəribsə) təkrar göndərmə
+         if (currentGameState.statusMessage?.includes("təklif")) {
+             console.log("[Client Action 3.4] handleRestartGame: Yenidən başlatma təklifi artıq aktivdir.");
              return;
          }
 
         // --- Serverə Göndər ---
         if (socket && socket.connected) {
-             // AI oyununda restart lokal olaraq idarə edilə bilər? Yoxsa serverə göndərilsin?
-             // Server-mərkəzli olduğu üçün gəlin serverə göndərək. Server AI olduğunu bilib özü reset edə bilər.
-             // if (isPlayingAgainstAI) {
-             //     console.log("[Client Action 3.4] AI oyunu üçün lokal restart çağırılır (Serverə də göndərmək olar)...");
-             //     // Serverə AI restart hadisəsi göndər? Məs: socket.emit('request_ai_restart');
-             //     // Və ya birbaşa lokal reset? Bu server state ilə uyğunsuzluq yaradar.
-             //     // Ən yaxşısı serverə normal request göndərməkdir.
-             // }
-
              console.log("[Client Action 3.4] Serverə 'request_restart' göndərilir.");
              socket.emit('request_restart');
              // UI-də düyməni deaktiv etmək və mesaj göstərmək serverdən gələn state ilə olacaq.
-             // Məsələn, server statusu "Restart təklif edildi..." edə bilər.
-             // if(gameStatusDisplay) gameStatusDisplay.textContent = "Yenidən başlatma təklifi göndərildi...";
-             // if(restartGameBtn) restartGameBtn.disabled = true;
+             if(gameStatusDisplay) gameStatusDisplay.textContent = "Yenidən başlatma təklifi göndərildi...";
+             if(restartGameBtn) restartGameBtn.disabled = true;
 
         } else {
             console.error("[Client Action 3.4] handleRestartGame: Socket bağlantısı yoxdur!");
@@ -1101,14 +1139,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         }
     }
 
-    // performLocalRestart funksiyası artıq lazımsızdır, çünki client state-i özü reset etmir.
-    // Serverdən gələn yeni gameState UI-ni yeniləyəcək (sıfırlanmış vəziyyətə).
-    /*
-    function performLocalRestart() {
-         console.log("performLocalRestart: Oyun vəziyyəti və lövhə sıfırlanır...");
-         // ... (köhnə kod) ...
-    }
-    */
+    // performLocalRestart funksiyası artıq lazım deyil
     console.log("[Refactor Note 3.4] performLocalRestart funksiyası artıq istifadə edilmir.");
 
 
@@ -1128,129 +1159,86 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     // --- Part 3.5: Client Əməliyyatları - SNOW Düymələri ---
     // ------------------------------------------------------------------------
     // Qeyd: SNOW'u çağırmaq və oyundan çıxarmaq üçün düymələrin handler-ları.
-    // Hazırda bunlar əsasən lokal client vəziyyətini dəyişir. Gələcəkdə
-    // serverə hadisə göndərmələri daha doğru olardı.
+    // Bunlar serverə müvafiq hadisələri göndərir.
 
     /**
      * "SNOW'u Çağır" düyməsinə basıldıqda işə düşür.
-     * Lokal vəziyyəti AI oyununa keçirir və zər atma prosesini başladır.
+     * Serverə AI oyununu başlatmaq üçün tələb göndərir.
      */
     function handleCallSnow() {
         console.log("[Client Action 3.5] handleCallSnow çağırıldı.");
 
         // --- Client Tərəfi Yoxlamalar ---
-        // isOpponentPresent qlobal dəyişəni real rəqib VƏ YA AI-nin olub olmadığını göstərir
-        if (isOpponentPresent || isPlayingAgainstAI) { // isOpponentPresent yoxlaması kifayətdir əslində
+        if (isOpponentPresent || isPlayingAgainstAI) {
             console.warn("[Client Action 3.5] handleCallSnow: Artıq rəqib var və ya AI ilə oynanılır.");
             return;
         }
-        if (!isCurrentUserCreator) { // Yalnız yaradan çağıra bilsin
+        if (!isCurrentUserCreator) {
              alert("Yalnız otaq yaradan SNOW-u çağıra bilər.");
              return;
         }
-        // Server bağlantısını yoxlamaq? AI oyunu lokal olduğu üçün bəlkə vacib deyil?
-        // Amma otaq məlumatları serverdən gəldiyi üçün yoxlayaq.
         if (!socket || !socket.connected) {
              console.error("[Client Action 3.5] handleCallSnow: Socket bağlantısı yoxdur!");
              alert("Serverlə bağlantı yoxdur. SNOW çağırıla bilmir.");
              return;
         }
-        // TODO: Serverə 'request_start_ai' hadisəsi göndər və serverin 'gameState' yaratmasını gözlə.
-        // Hələlik lokal davam edirik:
+        if (!currentRoomId) {
+             console.error("[Client Action 3.5] handleCallSnow: Otaq ID-si mövcud deyil!");
+             alert("Otaq ID tapılmadığı üçün SNOW çağırıla bilmir.");
+             return;
+        }
 
-        console.log("[Client Action 3.5] handleCallSnow: SNOW oyuna əlavə edilir (lokal)...");
+        console.log("[Client Action 3.5] handleCallSnow: Serverə 'request_start_ai' göndərilir...");
 
-        // Lokal vəziyyəti yenilə
-        isPlayingAgainstAI = true;
-        isOpponentPresent = true; // Rəqib yeri doldu (AI ilə)
-        opponentPlayerName = "SNOW";
-        // aiPlayerSymbol daha sonra təyin olunacaq
+        // Serverə AI oyununu başlatma tələbini göndər
+        socket.emit('request_start_ai', { roomId: currentRoomId });
 
-        // UI elementlərini yenilə
-        updatePlayerInfo();             // Rəqib adını yenilə
-        updateHeaderButtonsVisibility(); // Düymələri yenilə ("Remove SNOW" görünsün)
-        if (callSnowBtn) callSnowBtn.disabled = true; // Özünü deaktiv et
-
-        // Zər atma prosesini başlat (əgər istifadəçi bunu istəyirdisə)
-        // Əvvəlki cavabdakı düzəlişə əsasən zər atma başlasın
-        console.log("[Client Action 3.5] handleCallSnow: Zər atma prosesi başladılır...");
-        if (gameStatusDisplay) gameStatusDisplay.textContent = "SNOW ilə oyun başlayır. Zər atın!";
-        if (turnIndicator) turnIndicator.textContent = 'Zər Atılır...';
-
-        // İlkin oyun vəziyyətini quraq (client tərəfində) - Server etməli idi!
-        currentGameState = { // Çox sadələşdirilmiş ilkin state
-             board: Array(boardSize * boardSize).fill(''),
-             player1SocketId: socket?.id, // Özümüz
-             player2SocketId: 'AI_SNOW', // Simvolik AI ID
-             player1UserId: loggedInUser?.id,
-             player2UserId: 'AI_SNOW',
-             player1Username: currentPlayerName,
-             player2Username: opponentPlayerName,
-             player1Symbol: null, player2Symbol: null,
-             player1Roll: null, player2Roll: null,
-             diceWinnerSocketId: null, symbolPickerSocketId: null,
-             isGameOver: false, // Oyun hələ başlamayıb, zər atılır
-             winnerSymbol: null, winningCombination: [],
-             statusMessage: "Zər Atılır...",
-             lastMoveTime: Date.now()
-        };
-        // Bu lokal state server ilə sinxron deyil! Yalnız UI-ni idarə etmək üçündür.
-
-        setupDiceModalForRollOff(); // Zər modalını hazırla
-        showModal(diceRollModal);   // Zər modalını göstər
-        initDice();                 // Zəri başlanğıc vəziyyətinə gətir
-
-        if (restartGameBtn) restartGameBtn.disabled = false; // Restart aktiv olsun
-        console.log("[Client Action 3.5] handleCallSnow: Proses tamamlandı (zər atma gözlənilir).");
+        // UI-ni dərhal yeniləməyək, serverdən gələcək 'game_state_update' cavabını gözləyək.
+        // Cavab gələndə UI (rəqib adı, düymələr, status) avtomatik yenilənəcək.
+        if (callSnowBtn) callSnowBtn.disabled = true; // Düyməni deaktiv et (cavab gələnə qədər)
+        if (gameStatusDisplay) gameStatusDisplay.textContent = "SNOW oyuna dəvət edilir..."; // Keçici status
     }
 
     /**
      * "SNOW'u Çıxart" düyməsinə basıldıqda işə düşür.
-     * Lokal vəziyyəti AI oyunundan çıxarır və rəqib gözləmə vəziyyətinə qaytarır.
+     * Serverə AI oyununu dayandırmaq üçün tələb göndərir.
      */
     function handleRemoveSnow() {
         console.log("[Client Action 3.5] handleRemoveSnow çağırıldı.");
+
         // --- Client Tərəfi Yoxlamalar ---
-        if (!isPlayingAgainstAI) { // Yalnız AI ilə oynayarkən işləsin
+        if (!isPlayingAgainstAI) {
              console.warn("[Client Action 3.5] handleRemoveSnow: Hazırda AI ilə oynanılmır.");
              return;
         }
-        if (!isCurrentUserCreator) { // Yalnız yaradan çıxara bilsin
+        if (!isCurrentUserCreator) {
              console.warn("[Client Action 3.5] handleRemoveSnow: Yalnız otaq yaradan SNOW-u çıxara bilər.");
              return;
         }
-         // TODO: Serverə 'request_stop_ai' hadisəsi göndər və serverin 'gameState'-i sıfırlamasını gözlə.
-         // Hələlik lokal davam edirik:
+        if (!socket || !socket.connected) {
+            console.error("[Client Action 3.5] handleRemoveSnow: Socket bağlantısı yoxdur!");
+            alert("Serverlə bağlantı yoxdur. SNOW çıxarıla bilmir.");
+            return;
+        }
+         if (!currentRoomId) {
+             console.error("[Client Action 3.5] handleRemoveSnow: Otaq ID-si mövcud deyil!");
+             return;
+         }
 
-        console.log("[Client Action 3.5] handleRemoveSnow: SNOW oyundan çıxarılır (lokal)...");
+        console.log("[Client Action 3.5] handleRemoveSnow: Serverə 'request_stop_ai' göndərilir...");
 
-        // Lokal vəziyyəti sıfırla
-        isPlayingAgainstAI = false;
-        isOpponentPresent = false; // Rəqib yeri boşaldı
-        opponentPlayerName = "Rəqib Gözlənilir...";
-        aiPlayerSymbol = ''; // Lazım deyil artıq
-        isGameOver = true;   // Oyunu bitmiş hesab et
+        // Serverə AI oyununu dayandırma tələbini göndər
+        socket.emit('request_stop_ai', { roomId: currentRoomId });
 
-        resetGameStateVars();   // Oyun dəyişənlərini sıfırla (simvollar, sıra vs.)
-        resetBoardAndStatus();  // Lövhəni və status mesajlarını təmizlə
-
-        // Qlobal gameState-i də sıfırlayaq (və ya serverdən gələni gözləyək?)
-        // Ən yaxşısı serverə bildirməkdir. Hələlik lokal sıfırlayaq:
-        currentGameState = {}; // Boş obyektə çevirək
-
-        // UI-ni yenilə
-        updatePlayerInfo();             // Rəqib adını yenilə
-        updateHeaderButtonsVisibility(); // Düymələri yenilə ("Call SNOW" görünməlidir)
-
-        if(gameStatusDisplay) gameStatusDisplay.textContent = "SNOW oyundan çıxarıldı. Rəqib gözlənilir...";
-        if(turnIndicator) turnIndicator.textContent = "Gözlənilir";
-
-        // Açıq qala biləcək modalları bağla
-        hideModal(diceRollModal);
-        hideModal(symbolSelectModal);
-
-         console.log("[Client Action 3.5] handleRemoveSnow: Proses tamamlandı.");
+        // UI-ni dərhal yeniləməyək, serverdən gələcək 'game_state_update' cavabını gözləyək.
+        if (removeSnowBtn) removeSnowBtn.disabled = true; // Düyməni deaktiv et
+        if (gameStatusDisplay) gameStatusDisplay.textContent = "SNOW oyundan çıxarılır..."; // Keçici status
     }
+
+    /** Köhnə lokal restart funksiyaları (artıq istifadə edilmir) */
+    function resetGameStateVars() { console.warn("resetGameStateVars çağırıldı (köhnəlmiş)"); }
+    function resetBoardAndStatus() { console.warn("resetBoardAndStatus çağırıldı (köhnəlmiş)"); }
+    function setupDiceModalForRollOff() { console.warn("setupDiceModalForRollOff çağırıldı (köhnəlmiş)"); }
 
 // --- Hissə 3.5 Sonu ---
 // ------------------------------------------------------------------------
@@ -1268,19 +1256,23 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     // --- Part 3.6: Client Əməliyyatları - Otaq Əməliyyatları ---
     // ------------------------------------------------------------------------
     // Qeyd: Otaq ayarlarını açmaq, yadda saxlamaq, silmək və rəqibi
-    // kənarlaşdırmaq üçün funksiyalar. Bunların əksəriyyəti serverlə
-    // əlaqə tələb edir və hazırda tam işlək deyil.
+    // kənarlaşdırmaq üçün funksiyalar. Bunlar serverlə əlaqə tələb edir.
 
     /**
      * Otaq ayarları modal pəncərəsini açır.
      */
     function openEditModal() {
         console.log("[Client Action 3.6] openEditModal çağırıldı.");
-        // AI ilə oynayarkən və ya yaradan deyilsə icazə vermə
+        // Yoxlamalar
         if (isPlayingAgainstAI) { alert("AI oyununda otaq ayarları dəyişdirilə bilməz."); return; }
         if (!isCurrentUserCreator) { alert("Yalnız otağı yaradan parametrləri dəyişə bilər."); return; }
 
-        console.warn("[Client Action 3.6] Otaq ayarları funksionallığı hələ tam serverə inteqrasiya edilməyib.");
+        // Serverdən gələn ən son otaq məlumatını istifadə edək (currentRoomData)
+        if (!currentRoomData || !currentRoomData.id) {
+             console.error("[Client Action 3.6] openEditModal: Cari otaq məlumatları tapılmadı!");
+             alert("Otaq məlumatları alınarkən xəta baş verdi.");
+             return;
+        }
 
         // Modal elementlərini tap
         if (!editRoomModal) { console.error("editRoomModal tapılmadı!"); return; }
@@ -1289,43 +1281,52 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         const passwordInput = editRoomModal.querySelector('#edit-room-password');
         const boardSizeSelect = editRoomModal.querySelector('#edit-board-size');
         const msgElement = editRoomModal.querySelector('#edit-room-message');
+        const saveBtn = editRoomModal.querySelector('#save-room-changes-btn');
+        const deleteBtn = editRoomModal.querySelector('#delete-room-confirm-btn');
 
-        // Mövcud otaq məlumatlarını modalda göstər (currentRoomData-dan)
-        // Qeyd: currentRoomData serverdən 'room_info' ilə gəlməlidir.
-        if (nameInput) nameInput.value = currentGameState?.name || currentRoomData.name || ''; // gameState-dən də yoxla
-        if (passwordCheck) passwordCheck.checked = currentRoomData.hasPassword || false; // Serverdən gələnə əsasən
+
+        // Mövcud otaq məlumatlarını modalda göstər
+        if (nameInput) nameInput.value = currentRoomData.name || '';
+        if (passwordCheck) passwordCheck.checked = currentRoomData.hasPassword || false;
         if (passwordInput) {
              passwordInput.value = ''; // Şifrəni heç vaxt göstərmə
-             passwordInput.style.display = passwordCheck?.checked ? 'block' : 'none'; // Checkbox-a görə göstər/gizlə
+             passwordInput.style.display = passwordCheck?.checked ? 'block' : 'none';
         }
         // Checkbox dəyişdikdə şifrə inputunu göstər/gizlə
         if (passwordCheck && passwordInput) {
-             passwordCheck.onchange = null; // Köhnə listenerı sil
+             // Köhnə listenerı silmək üçün onchange əvəzinə add/removeEventListener istifadə etmək daha yaxşıdır
+             // Amma hələlik belə qalsın
+             passwordCheck.onchange = null;
              passwordCheck.onchange = () => { passwordInput.style.display = passwordCheck.checked ? 'block' : 'none'; };
         }
         if (boardSizeSelect) {
-            // Hazırkı ölçünü gameState-dən və ya currentRoomData-dan al
-             const currentSize = currentGameState?.boardSize || currentRoomData.boardSize || boardSize;
+            // Hazırkı ölçünü currentRoomData-dan al
+             const currentSize = currentRoomData.boardSize || boardSize; // Fallback olaraq qlobal boardSize
              boardSizeSelect.value = currentSize.toString();
+             // Hazırda oyun gedirsə ölçü seçimini blokla? Server onsuz da icazə verməyəcək.
+             // boardSizeSelect.disabled = !!(currentGameState.player1SocketId && currentGameState.player2SocketId && !currentGameState.isGameOver);
         }
-        if (msgElement) { msgElement.textContent = ''; msgElement.className = 'message'; } // Mesajı təmizlə
+        if (msgElement) { msgElement.textContent = ''; msgElement.className = 'message'; }
+        if (saveBtn) saveBtn.disabled = false; // Əvvəlcə aktiv olsun
+        if (deleteBtn) deleteBtn.disabled = false;
 
         showModal(editRoomModal); // Modalı göstər
     }
 
     /**
-     * Otaq ayarları modalındakı dəyişiklikləri yadda saxlayır (hələlik əsasən lokal).
+     * Otaq ayarları modalındakı dəyişiklikləri serverə göndərir.
      */
     function saveRoomChanges() {
-        console.warn("[Client Action 3.6] saveRoomChanges: Bu funksiya hələ tam serverə inteqrasiya edilməyib.");
+        console.log("[Client Action 3.6] saveRoomChanges çağırıldı.");
         if (!editRoomModal) return;
 
-        // Elementləri tap
         const nameInput = editRoomModal.querySelector('#edit-room-name');
         const passwordCheck = editRoomModal.querySelector('#edit-room-password-check');
         const passwordInput = editRoomModal.querySelector('#edit-room-password');
         const boardSizeSelect = editRoomModal.querySelector('#edit-board-size');
         const msgElement = editRoomModal.querySelector('#edit-room-message');
+        const saveBtn = editRoomModal.querySelector('#save-room-changes-btn');
+        const deleteBtn = editRoomModal.querySelector('#delete-room-confirm-btn');
 
         // Dəyərləri al
         const newName = nameInput?.value.trim();
@@ -1334,60 +1335,46 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
 
         // Validasiyalar
         if (!newName) { showMsg(msgElement, 'Otaq adı boş ola bilməz.', 'error'); return; }
-        let newPasswordValue = null; let finalHasPassword = false;
+        let newPasswordValue = null;
         if (newHasPasswordChecked) {
             if (!passwordInput) { showMsg(msgElement, 'Şifrə sahəsi tapılmadı!', 'error'); return; }
             newPasswordValue = passwordInput.value;
-            // Şifrə validasiyası (serverdəki ilə eyni olmalıdır)
-            if (!newPasswordValue || newPasswordValue.length < 2 || !(/[a-zA-Z]/.test(newPasswordValue) && /\d/.test(newPasswordValue))) {
-                showMsg(msgElement, 'Şifrə tələblərə uyğun deyil (min 2 simvol, 1 hərf+1 rəqəm).', 'error', 5000); return;
+            // Şifrə validasiyası (serverdəki ilə eyni olmalıdır - məsələn, boş ola bilməz)
+            // if (!newPasswordValue || newPasswordValue.length < 2 || !(/[a-zA-Z]/.test(newPasswordValue) && /\d/.test(newPasswordValue))) {
+            if (!newPasswordValue) { // Sadəcə boş olmadığını yoxlayaq, server ətraflı yoxlasın
+                showMsg(msgElement, 'Şifrəli otaq üçün şifrə daxil edilməlidir.', 'error', 5000); return;
             }
-            finalHasPassword = true;
         } else {
-            finalHasPassword = false; newPasswordValue = null;
+            newPasswordValue = null; // Şifrəni silmək üçün null göndər
         }
 
-        // TODO: Serverə 'update_room_settings' hadisəsi göndər:
-        /*
+        // Serverə göndər
         if (socket && socket.connected) {
             console.log("[Client Action 3.6] Serverə 'update_room_settings' göndərilir...");
+            if(saveBtn) saveBtn.disabled = true;
+            if(deleteBtn) deleteBtn.disabled = true; // Digər əməliyyatları da blokla
+            showMsg(msgElement, 'Dəyişikliklər serverə göndərilir...', 'info', 0); // Silinməyən mesaj
+
             socket.emit('update_room_settings', {
-                roomId: currentRoomId,
+                roomId: currentRoomId, // Qlobal dəyişən
                 newName: newName,
                 newPassword: newPasswordValue, // Server null qəbul edib şifrəni silə bilər
                 newBoardSize: newBoardSize
             });
-            showMsg(msgElement, 'Dəyişikliklər serverə göndərildi...', 'info');
-            // Cavabı gözləmədən modalı bağlayaq? Yoxsa serverdən təsdiq gözləyək?
-            // hideModal(editRoomModal);
+            // Cavab üçün 'game_state_update' və ya 'room_info' və ya 'game_error' gözlənilir.
+            // Uğurlu olarsa, serverdən gələn məlumat UI-ni yeniləyəcək və modalı bağlamaq olar.
+            // Uğursuz olarsa, server 'game_error' göndərib mesaj verəcək.
+            // Timeout əlavə edək ki, cavab gəlməzsə düymələr aktivləşsin.
+            setTimeout(() => {
+                 if (saveBtn?.disabled) {
+                     showMsg(msgElement, 'Serverdən cavab gəlmədi. Təkrar yoxlayın.', 'error');
+                     if(saveBtn) saveBtn.disabled = false;
+                     if(deleteBtn) deleteBtn.disabled = false;
+                 }
+             }, 7000); // 7 saniyə
+
         } else {
              showMsg(msgElement, 'Serverlə bağlantı yoxdur!', 'error');
-        }
-        */
-        // Hələlik lokal dəyişiklikləri tətbiq edək (serverdən gələnə qədər)
-        showMsg(msgElement, 'Dəyişikliklər lokal olaraq saxlandı (serverə göndərilməli!).', 'success', 2500);
-
-        let needsRestart = false;
-        const oldBoardSize = currentGameState?.boardSize || currentRoomData.boardSize || boardSize;
-        if (oldBoardSize !== newBoardSize) {
-             needsRestart = true;
-             // Qlobal boardSize dəyişənini yenilə (bu əsasdır)
-             boardSize = newBoardSize;
-             currentRoomData.boardSize = newBoardSize; // Bunu da yeniləyək
-             if(currentGameState) currentGameState.boardSize = newBoardSize; // Bunu da
-             adjustStylesForBoardSize(boardSize); // Stili yenilə
-             createBoard(); // Yeni lövhəni yarat!
-        }
-        currentRoomData.name = newName;
-        currentRoomData.hasPassword = finalHasPassword;
-        if (roomNameDisplay) roomNameDisplay.textContent = `Otaq: ${escapeHtml(newName)}`; // Başlığı yenilə
-
-        hideModal(editRoomModal); // Hər halda modalı bağla
-
-        if (needsRestart) {
-            console.log("[Client Action 3.6] Ölçü dəyişdiyi üçün oyun yenidən başladılır (performLocalRestart)...");
-            // Serverə bildirmək lazımdır! Hələlik yalnız lokal restart edir.
-            performLocalRestart(); // Bu funksiya oyun vəziyyətini sıfırlayıb zər modalını göstərməlidir
         }
     }
 
@@ -1401,21 +1388,25 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         if (!isCurrentUserCreator) { console.warn("Yalnız yaradan otağı silə bilər."); return; }
         if (!currentRoomId) { console.error("Silinəcək otaq ID-si yoxdur!"); return; }
 
-        // İstifadəçidən təsdiq al
         if (confirm(`'${escapeHtml(currentRoomData.name || currentRoomId)}' otağını silmək istədiyinizə əminsiniz? Bu əməliyyat geri qaytarıla bilməz.`)) {
             console.log(`[Client Action 3.6] Otağı (${currentRoomId}) silmək üçün serverə 'delete_room' göndərilir...`);
             const msgElement = editRoomModal?.querySelector('#edit-room-message');
-            if(msgElement) showMsg(msgElement, 'Otaq silinir...', 'info', 0); // Silinməyən mesaj
+            const saveBtn = editRoomModal?.querySelector('#save-room-changes-btn');
+            const deleteBtn = editRoomModal?.querySelector('#delete-room-confirm-btn');
+
+            if(msgElement) showMsg(msgElement, 'Otaq silinir...', 'info', 0);
+            if(saveBtn) saveBtn.disabled = true;
+            if(deleteBtn) deleteBtn.disabled = true;
 
             if (socket && socket.connected) {
                 socket.emit('delete_room', { roomId: currentRoomId });
-                // Server 'room_deleted_kick' və ya xəta göndərəcək.
-                // Client tərəf həmin hadisələri gözləyib lobiyə yönlənməlidir.
-                // Burada dərhal yönləndirmə etməyək.
-                // setTimeout(() => { window.location.href = '../lobby/test_odalar.html'; }, 1500);
+                // Server 'room_deleted_kick' göndərərək client-i lobiyə yönləndirməlidir.
+                // Client tərəfi həmin hadisəni gözləyir (Part 4.3-də).
             } else {
                  alert("Serverlə bağlantı yoxdur. Otaq silinə bilmədi.");
                  if(msgElement) showMsg(msgElement, 'Serverlə bağlantı yoxdur!', 'error');
+                 if(saveBtn) saveBtn.disabled = false;
+                 if(deleteBtn) deleteBtn.disabled = false;
             }
         }
     }
@@ -1428,27 +1419,30 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         // Yoxlamalar
         if (isPlayingAgainstAI) { console.warn("AI otağından rəqib çıxarmaq olmaz."); return; }
         if (!isCurrentUserCreator) { console.warn("Yalnız yaradan rəqibi çıxara bilər."); return; }
-        // isOpponentPresent yoxlaması server tərəfindən ediləcək
+        if (!isOpponentPresent) { console.log("Çıxarılacaq rəqib yoxdur."); return; } // Rəqib yoxdursa heçnə etmə
         if (!currentRoomId) { console.error("Otaq ID-si yoxdur!"); return; }
-        // Rəqibin adını alaq (əgər varsa)
-        const opponentNameToKick = opponentPlayerName || "Rəqib";
 
-        if (confirm(`${escapeHtml(opponentNameToKick)}-i otaqdan çıxarmaq istədiyinizə əminsiniz?`)) {
-             console.log(`[Client Action 3.6] Rəqibi (${opponentNameToKick}) kənarlaşdırmaq üçün serverə 'kick_opponent' göndərilir...`);
+        const opponentToKick = opponentPlayerName || "Rəqib";
+
+        if (confirm(`${escapeHtml(opponentToKick)}-i otaqdan çıxarmaq istədiyinizə əminsiniz?`)) {
+             console.log(`[Client Action 3.6] Rəqibi (${opponentToKick}) kənarlaşdırmaq üçün serverə 'kick_opponent' göndərilir...`);
+             if (kickOpponentBtn) kickOpponentBtn.disabled = true; // Düyməni deaktiv et
 
              if (socket && socket.connected) {
                  socket.emit('kick_opponent', { roomId: currentRoomId });
-                 // Server cavab olaraq 'opponent_left_game' göndərəcək (qalan oyunçuya)
-                 // və otaq siyahısını yeniləyəcək. Client tərəfdə əlavə UI yeniləməsinə
-                 // ehtiyac yoxdur, serverdən gələn hadisələr UI-ni yeniləməlidir.
-                 // Əvvəlki lokal UI yeniləmələrini kommentə alırıq:
-                 /*
-                 opponentPlayerName = 'Rəqib Gözlənilir...'; isOpponentPresent = false; isPlayingAgainstAI = false; aiPlayerSymbol = '';
-                 // ... (UI yeniləmələri) ...
-                 */
+                 // Server cavab olaraq 'opponent_left_game' və ya 'game_state_update' göndərəcək.
+                 // UI yeniləməsi həmin hadisələrlə olacaq.
              } else {
                  alert("Serverlə bağlantı yoxdur. Rəqib çıxarıla bilmədi.");
+                 if (kickOpponentBtn) kickOpponentBtn.disabled = false; // Xəta baş verərsə aktiv et
              }
+             // Timeout əlavə et (əgər cavab gəlməzsə)
+             setTimeout(() => {
+                 if(kickOpponentBtn?.disabled) {
+                     console.warn("Kick opponent cavabı gəlmədi.");
+                     if(kickOpponentBtn) kickOpponentBtn.disabled = false;
+                 }
+             }, 7000);
         }
     }
 
@@ -1483,11 +1477,12 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             socket.disconnect();
         }
 
-        // AI oyunu üçün socket bağlantısı lazım deyil (əgər AI tamamilə clientdə işləyirsə)
-        // Amma bizim SNOW düyməsi məntiqi hələlik lokal olduğu üçün, real multiplayer halını yoxlayaq
-        // `initializeGame` funksiyası onsuz da AI oyununda bunu çağırmır.
         if (!roomIdToJoin) {
             console.error("[Socket IO 4.1] Socket bağlantısı üçün Otaq ID təyin edilməyib!");
+            hideLoadingOverlay();
+            alert("Otaq ID tapılmadığı üçün serverə qoşulmaq mümkün deyil.");
+            // Lobiyə yönləndir?
+             window.location.href = '../lobby/test_odalar.html';
             return;
         }
 
@@ -1495,39 +1490,33 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         showLoadingOverlay('Serverə qoşulunur...');
 
         // Yeni socket bağlantısını yarat
-        // `io()` funksiyası HTML-də əlavə edilmiş /socket.io/socket.io.js faylından gəlir
-        // `forceNew: true` əlavə etmək bəzən köhnə bağlantı problemlərini həll edir, amma ehtiyatlı olmaq lazımdır.
-        // socket = io({ reconnectionAttempts: 3, forceNew: true });
-        socket = io({ reconnectionAttempts: 3 }); // Qoşulma cəhdlərini məhdudlaşdır
+        socket = io({
+             reconnectionAttempts: 3, // 3 dəfə cəhd etsin
+             // query: { roomId: roomIdToJoin } // Ehtiyac yoxdur, player_ready_in_room ilə göndərilir
+        });
 
         // --- Əsas Bağlantı Hadisələri ---
         socket.on('connect', () => {
             console.log(`[Socket IO 4.1] >>> connect: Oyun serverinə qoşuldu! Socket ID: ${socket.id}, Otaq ID: ${roomIdToJoin}`);
             hideLoadingOverlay(); // Yükləmə ekranını gizlət
 
-            // Serverə bu otaqda hazır olduğumuzu bildirək. Bu, xüsusilə refresh/reconnect üçün vacibdir.
-            // Server bu hadisəni alıb bizə hazırkı oyun vəziyyətini göndərəcək ('game_state_update').
+            // Serverə bu otaqda hazır olduğumuzu bildirək.
             console.log(`[Socket IO 4.1] <<< emit: 'player_ready_in_room' göndərilir. RoomID: ${roomIdToJoin}`);
             socket.emit('player_ready_in_room', { roomId: roomIdToJoin });
-
-            // İlkin status mesajı (əgər hələ rəqib yoxdursa)
-            // Bu, serverdən gələn ilk `game_state_update` ilə onsuz da yenilənəcək.
-            // if (gameStatusDisplay && !isOpponentPresent) { gameStatusDisplay.textContent = 'Rəqib gözlənilir...'; }
         });
 
         socket.on('disconnect', (reason) => {
             console.warn(`[Socket IO 4.1] >>> disconnect: Serverlə bağlantı kəsildi! Səbəb: ${reason}, Socket ID: ${socket.id}`);
-            // UI-ni yeniləyərək bağlantının kəsildiyini göstər
+            // UI-ni yenilə
             if (gameStatusDisplay) gameStatusDisplay.textContent = 'Bağlantı kəsildi!';
             if (turnIndicator) turnIndicator.textContent = "Offline";
-            // Oyunu bitmiş hesab et və lövhəni blokla
-            // currentGameState.isGameOver = true; // State serverdədir, lokal dəyişməyək
             if(boardElement){ boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none';}
-            // Oyunçu məlumatlarını yenilə (Offline statusu göstər?)
-            // opponentPlayerName = 'Rəqib (Offline)'; // Bunu etməyək, server state-i əsasdır
-            // updatePlayerInfo();
-            // Yenidən qoşulma cəhdi avtomatik baş verəcək (reconnectionAttempts: 3)
-            showLoadingOverlay('Bağlantı bərpa edilir...'); // Bərpa cəhdini göstər
+            // Oyunçu məlumatlarında Offline göstər?
+            if (playerONameDisplay && playerONameDisplay.textContent !== 'Gözlənilir...') {
+                 playerONameDisplay.textContent += ' (Offline)';
+            }
+            // Yenidən qoşulma cəhdi avtomatik baş verəcək
+            showLoadingOverlay('Bağlantı bərpa edilir...');
         });
 
         socket.on('connect_error', (error) => {
@@ -1536,8 +1525,8 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             if (gameStatusDisplay) gameStatusDisplay.textContent = 'Serverə qoşulmaq mümkün olmadı!';
             if (turnIndicator) turnIndicator.textContent = "Xəta";
             if(boardElement){ boardElement.style.opacity = '0.5'; boardElement.style.pointerEvents = 'none';}
-            // Bəlkə başqa cəhd etməyəcək, istifadəçiyə bildirmək lazımdır
-            // alert(`Serverə qoşulmaq mümkün olmadı: ${error.message}. Səhifəni yeniləyin.`);
+            alert(`Serverə qoşulmaq mümkün olmadı: ${error.message}. Lobiyə yönləndirilirsiniz.`);
+             window.location.href = '../lobby/test_odalar.html';
         });
 
         // --- Oyunla Bağlı Xüsusi Hadisə Dinləyicilərini Quraşdır ---
@@ -1554,47 +1543,31 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
     function setupGameEventListeners(socketInstance) {
         console.log("[Socket IO 4.1] setupGameEventListeners: Oyun hadisə dinləyiciləri quraşdırılır...");
 
-        // Köhnə listenerları təmizləmək (əgər varsa) - təkrar qoşulmalarda vacibdir
-        socketInstance.off('game_state_update');
-        socketInstance.off('opponent_left_game'); // Bu hələ də lazımdırmı? Yoxsa state update ilə gəlir? Qalsın.
-        socketInstance.off('room_deleted_kick');
-        socketInstance.off('force_redirect_lobby');
-        socketInstance.off('invalid_move');
-        socketInstance.off('game_error');
-        socketInstance.off('info_message');
-        socketInstance.off('room_info'); // Bunu da game_state_update əvəz edə bilər? Hələlik qalsın.
-        // Köhnə hadisələri (artıq state update ilə gəlir) qeyd edək:
-        // socketInstance.off('opponent_joined'); // Artıq game_state_update ilə gəlir
-        // socketInstance.off('opponent_dice_result'); // Artıq game_state_update ilə gəlir
-        // socketInstance.off('opponent_symbol_chosen'); // Artıq game_state_update ilə gəlir
-        // socketInstance.off('opponent_moved'); // Artıq game_state_update ilə gəlir
-        // socketInstance.off('restart_requested'); // Artıq game_state_update statusMessage ilə gəlir
-        // socketInstance.off('restart_accepted'); // Artıq game_state_update ilə gəlir
+        // Köhnə listenerları təmizləmək
+        const eventsToRemove = [
+            'game_state_update', 'opponent_left_game', 'room_deleted_kick',
+            'force_redirect_lobby', 'invalid_move', 'game_error',
+            'info_message', 'room_info', 'update_room_settings_result' // Yeni hadisə?
+        ];
+        eventsToRemove.forEach(event => socketInstance.off(event));
 
         console.log("[Socket IO 4.1] Köhnə oyun hadisə dinləyiciləri (əgər varsa) silindi.");
 
         // ======================================================
         // === ƏSAS HADİSƏ: Oyun Vəziyyəti Yeniləməsi        ===
-        // ===         (Hissə 4.2-də olacaq)              ===
+        // ===         (Hissə 4.2-də olacaq - növbəti hissə) ===
         // ======================================================
 
 
         // ======================================================
         // === DİGƏR HADİSƏLƏR                               ===
-        // ===    (Hissə 4.3-də olacaq)                     ===
+        // ===    (Hissə 4.3-də olacaq - növbəti hissə)      ===
         // ======================================================
 
 
-    } // setupGameEventListeners sonu
-
-// --- Hissə 4.1 Sonu ---
-// ------------------------------------------------------------------------
+    // --- Hissə 4.1 Sonu ---
+    // --- Part 4.1 Sonu (setupGameEventListeners funksiyası hələ açıqdır!) ---
 // ========================================================================
-// public/OYUNLAR/tictactoe/game/oda_ici.js
-// Yenidən Qurulmuş v1 (Server-Mərkəzli Vəziyyətə Uyğunlaşdırılır)
-// ========================================================================
-
-// ... (Əvvəlki hissələrdən kodlar buradadır) ...
 
 // document.addEventListener('DOMContentLoaded', () => {
 //     ... (Part 1, 2, 3-dən kodlar) ...
@@ -1606,249 +1579,230 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
         // --------------------------------------------------------------------
         // --- Part 4.2: ƏSAS HADİSƏ HANDLER-İ - 'game_state_update' ---
         // --------------------------------------------------------------------
-        // Qeyd: Server oyun vəziyyəti dəyişdikdə bu hadisəni göndərir.
-        // Bütün UI yeniləmələri bu funksiya vasitəsilə idarə olunur.
-
         socketInstance.on('game_state_update', (newState) => {
             console.log("[Socket Event 4.2] >>> game_state_update alındı. Status:", newState?.statusMessage);
-            // console.log("[Socket Event 4.2] Alınan State:", JSON.stringify(newState)); // Çox detallı log
+            // console.log("[Socket Event 4.2] Alınan State:", JSON.stringify(newState)); // Detallı log
 
             if (!newState || typeof newState !== 'object') {
                 console.error("[Socket Event 4.2] Keçərsiz və ya boş gameState alındı!");
-                // Bəlkə istifadəçiyə xəta göstərək?
                 if(gameStatusDisplay) gameStatusDisplay.textContent = "Serverdən keçərsiz məlumat alındı.";
                 return;
-            
+            }
 
             // --- Qlobal Vəziyyəti Yenilə ---
-            // Əvvəlki state ilə müqayisə etmək üçün köhnəni saxlaya bilərik (optional)
-            // const oldState = { ...currentGameState };
-            currentGameState = newState; // Ən son vəziyyəti qlobal dəyişəndə saxla
-            console.log("[State Update 4.2] currentGameState yeniləndi.");
+            const oldState = currentGameState; // Keçidləri yoxlamaq üçün köhnəni saxlayaq
+            currentGameState = newState;
+            isGameOver = newState.isGameOver; // Qlobal isGameOver yenilə
+             console.log("[State Update 4.2] currentGameState yeniləndi.");
 
-            // --- Lokal Dəyişənləri Yenilə (UI üçün lazım olanları) ---
-            // Lövhə ölçüsü dəyişibsə (bu normalda baş verməməlidir, amma ehtiyat üçün)
+            // --- Lokal Dəyişənləri Yenilə ---
             if (boardSize !== newState.boardSize) {
                  console.warn(`[State Update 4.2] Lövhə ölçüsü dəyişdi! Server: ${newState.boardSize}, Client: ${boardSize}. Lövhə yenidən yaradılır.`);
                  boardSize = newState.boardSize;
-                 createBoard(); // Lövhəni yenidən yarat (bu, updateBoardUI-ni də çağırmalıdır?)
-                 // updateBoardUI aşağıda onsuz da çağırılır, ona görə createBoard kifayətdir.
+                 createBoard();
+                 // Lövhə yenidən yaradıldığı üçün UI update-i növbəti dövrəyə saxla? Yox, davam edək.
             }
 
-            // Oyunçu adlarını və simvollarını yenilə (özümüzü və rəqibi təyin edərək)
-            if (socket && newState.player1SocketId === socket.id) {
-                currentPlayerName = newState.player1Username || loggedInUser?.nickname || 'Siz';
-                opponentPlayerName = newState.player2Username || 'Rəqib';
-                player1Symbol = newState.player1Symbol || '?'; // Mənim simvolum
-                player2Symbol = newState.player2Symbol || '?'; // Rəqibin simvolu
-            } else if (socket && newState.player2SocketId === socket.id) {
-                currentPlayerName = newState.player2Username || loggedInUser?.nickname || 'Siz';
-                opponentPlayerName = newState.player1Username || 'Rəqib';
-                player1Symbol = newState.player2Symbol || '?'; // Mənim simvolum
-                player2Symbol = newState.player1Symbol || '?'; // Rəqibin simvolu
-            } else {
-                // İzləyici və ya qoşulma problemi? Default adları saxlayaq.
-                currentPlayerName = loggedInUser?.nickname || 'Siz';
-                // Rəqibin adını tapmağa çalışaq
-                opponentPlayerName = newState.player1Username === currentPlayerName ? newState.player2Username : newState.player1Username;
-                opponentPlayerName = opponentPlayerName || 'Rəqib';
-                player1Symbol = '?'; // Simvolları bilmirik
-                player2Symbol = '?';
-                 console.warn(`[State Update 4.2] Socket ID (${socket?.id}) oyunçu ID-ləri ilə uyğun gəlmir. Ad/Simvol təyinatı default ola bilər.`);
-            }
-
-            // Oyunun bitib-bitmədiyini yenilə
-            const wasGameOver = typeof currentGameState.isGameOver === 'boolean' ? currentGameState.isGameOver : true; // Əvvəlki state üçün default
-            isGameOver = newState.isGameOver; // Qlobal dəyişəni yenilə
+            // Rəqibin olub olmadığını yenilə
+            isOpponentPresent = !!(newState.player1SocketId && newState.player2SocketId);
+             // isPlayingAgainstAI və isCurrentUserCreator serverdən gələn room_info ilə yenilənməlidir
+             // Hələlik fərz edirik ki, onlar doğrudur.
 
             // --- UI Yeniləmə Funksiyalarını Çağır ---
-            console.log("[State Update 4.2] UI yeniləmə funksiyaları çağırılır...");
-
-            // 1. Oyunçu məlumat panelini yenilə
-            updatePlayerInfo(); // Bu funksiya artıq currentGameState-ə baxır (baxmalıdır)
-
-            // 2. Sıra göstəricisini yenilə
-            updateTurnIndicator(); // Bu da currentGameState-ə baxır
-
-            // 3. Oyun lövhəsini yenilə
+            // console.log("[State Update 4.2] UI yeniləmə funksiyaları çağırılır...");
+            updatePlayerInfo();
+            updateTurnIndicator();
             const isMyTurnNow = socket && newState.currentPlayerSymbol && newState.currentPlayerSymbol === (newState.player1SocketId === socket.id ? newState.player1Symbol : newState.player2Symbol);
             updateBoardUI(newState.board || [], !!isMyTurnNow, newState.isGameOver, newState.winningCombination || []);
-
-            // 4. Əsas status mesajını və modal pəncərələri yenilə
             updateGameStatusAndModals(newState);
+            updateHeaderButtonsVisibility(); // Rəqib qoşulduqda/çıxdıqda vacibdir
 
-            // 5. Başlıq düymələrinin görünüşünü yenilə (Rəqib qoşuldu/çıxdı və ya AI başladı/bitdi isə vacibdir)
-            // isOpponentPresent və isCurrentUserCreator də serverdən gələn məlumatla yenilənməlidir.
-            // Hələlik bu dəyişənləri lokal idarə etdiyimiz üçün, updateHeaderButtonsVisibility-ni çağıraq.
-            // TODO: isOpponentPresent və isCurrentUserCreator-i server state-dən almaq.
-            isOpponentPresent = !!(newState.player1SocketId && newState.player2SocketId); // Server state-inə görə təyin et!
-            // isCurrentUserCreator hələ ki, server room_info ilə göndərməlidir (əgər göndərirsə).
-            updateHeaderButtonsVisibility();
-
-            // 6. Oyun bitibsə effektləri göstər
-            if (newState.isGameOver && !wasGameOver && newState.winnerSymbol && newState.winnerSymbol !== 'draw') {
-                // Oyun məhz bu update ilə bitibsə və qalib varsa
+            // --- Oyun Sonu Effektləri ---
+            const justFinished = newState.isGameOver && !oldState?.isGameOver;
+            if (justFinished && newState.winnerSymbol && newState.winnerSymbol !== 'draw') {
                 console.log("[State Update 4.2] Oyun bitdi, effektlər göstərilir.");
                 triggerShatterEffect(newState.winnerSymbol);
-                 // Restart düyməsini aktiv et (əgər deaktiv idisə)
-                 if (restartGameBtn) restartGameBtn.disabled = false;
-            } else if (!newState.isGameOver && restartGameBtn) {
-                 // Oyun (yenidən) başlayıbsa restart düyməsini deaktiv et (təklif göndərilənə qədər)
-                 // restartGameBtn.disabled = true; // Bunu server state-inə görə etmək daha yaxşıdır
+            } else {
+                 hideFireworks(); // Oyun bitməyibsə və ya bərabərlikdirsə effektləri gizlət
             }
+
+            // --- Düymə Vəziyyətləri ---
+            if (restartGameBtn) {
+                 // Oyun bitibsə və restart təklifi yoxdursa, aktiv et
+                 restartGameBtn.disabled = !(newState.isGameOver && !newState.statusMessage?.includes("təklif"));
+            }
+            if(callSnowBtn) callSnowBtn.disabled = isOpponentPresent || !isCurrentUserCreator || isPlayingAgainstAI;
+            if(removeSnowBtn) removeSnowBtn.disabled = !(isCurrentUserCreator && isPlayingAgainstAI);
+            if(kickOpponentBtn) kickOpponentBtn.disabled = !(isCurrentUserCreator && isOpponentPresent && !isPlayingAgainstAI);
+            if(editRoomBtn) editRoomBtn.disabled = !(isCurrentUserCreator && !isPlayingAgainstAI);
 
             // --- Əlavə Təmizləmələr ---
-            // Əgər hərəkət emalı gedirdisə, onu sıfırla
             if (isProcessingMove) {
-                console.log("[State Update 4.2] isProcessingMove sıfırlanır.");
+                // console.log("[State Update 4.2] isProcessingMove sıfırlanır.");
                 isProcessingMove = false;
+                // Lövhə pointerEvents updateBoardUI tərəfindən onsuz da idarə olunur
             }
 
-            console.log("[State Update 4.2] game_state_update emalı bitdi.");
-        } ;
-         // socketInstance.on('game_state_update', ...) sonu
+            // Otaq ayarları dəyişdirilibsə modalı bağla və mesajı təmizlə
+            // (Bunu ayrıca 'update_room_settings_result' hadisəsi ilə etmək daha yaxşıdır)
+            // if (oldState.name !== newState.name || ...) { hideModal(editRoomModal); }
+
+            // console.log("[State Update 4.2] game_state_update emalı bitdi.");
+        }); // socketInstance.on('game_state_update', ...) sonu
 
 
-        // ======================================================
-        // === DİGƏR HADİSƏLƏR                               ===
-        // ===    (Hissə 4.3-də olacaq)                     ===
-        // ======================================================
+        // --------------------------------------------------------------------
+        // --- Part 4.3: Digər Socket Hadisə Handler-ları ---
+        // --------------------------------------------------------------------
 
+        // ----- Rəqib Oyundan Ayrıldı -----
+        socketInstance.on('opponent_left_game', (data) => {
+            const opponentWhoLeft = data?.username || 'Rəqib';
+            console.log(`[Socket Event 4.3] >>> opponent_left_game alındı: ${opponentWhoLeft}`);
+            // Əsas UI yeniləmələri onsuz da növbəti 'game_state_update' ilə gələcək.
+            // Sadəcə əlavə mesaj göstərə bilərik.
+            if (gameStatusDisplay) {
+                 gameStatusDisplay.textContent = `${escapeHtml(opponentWhoLeft)} oyundan ayrıldı.`;
+                 gameStatusDisplay.className = 'game-status waiting'; // Gözləmə stili
+            }
+            isOpponentPresent = false; // Lokal state-i yeniləyək
+            updateHeaderButtonsVisibility(); // "Call SNOW" görünə bilər
+            if (restartGameBtn) restartGameBtn.disabled = true;
+            hideModal(diceRollModal);
+            hideModal(symbolSelectModal);
+        });
 
-    // } // setupGameEventListeners funksiyasının sonu (hələ bağlanmayıb)
+        // ----- Otaq Silindi / Kick Edildiniz -----
+        socketInstance.on('room_deleted_kick', (data) => {
+            const message = data?.message || 'Otaq silindi və ya otaqdan çıxarıldınız.';
+            console.warn(`[Socket Event 4.3] >>> room_deleted_kick alındı: ${message}`);
+            alert(message + "\nLobiyə yönləndirilirsiniz.");
+            window.location.href = '../lobby/test_odalar.html';
+        });
 
-// --- Hissə 4.2 Sonu ---
-// ------------------------------------------------------------------------
-// ========================================================================
-// public/OYUNLAR/tictactoe/game/oda_ici.js
-// Yenidən Qurulmuş v1 (Server-Mərkəzli Vəziyyətə Uyğunlaşdırılır)
-// ========================================================================
+        // ----- Lobiyə Məcburi Yönləndirmə -----
+        socketInstance.on('force_redirect_lobby', (data) => {
+            const message = data?.message || 'Otaqla bağlı problem yarandı.';
+            console.warn(`[Socket Event 4.3] >>> force_redirect_lobby alındı: ${message}`);
+            alert(message + "\nLobiyə yönləndirilirsiniz.");
+            window.location.href = '../lobby/test_odalar.html';
+        });
 
-// ... (Əvvəlki hissələrdən kodlar buradadır) ...
+        // ----- Keçərsiz Hərəkət Bildirişi -----
+        socketInstance.on('invalid_move', (data) => {
+            const message = data?.message || 'Keçərsiz hərəkət!';
+            console.warn(`[Socket Event 4.3] >>> invalid_move alındı: ${message}`);
+            // Müvəqqəti mesaj göstərək
+            if (gameStatusDisplay) {
+                 const originalText = gameStatusDisplay.textContent;
+                 gameStatusDisplay.textContent = message;
+                 gameStatusDisplay.style.color = 'var(--danger-color)';
+                 setTimeout(() => {
+                     // Yalnız mesaj hələ dəyişməyibsə, geri qaytar
+                     if (gameStatusDisplay.textContent === message) {
+                         gameStatusDisplay.textContent = originalText;
+                         gameStatusDisplay.style.color = ''; // Rəngi sıfırla
+                     }
+                 }, 2500);
+            }
+             // Hərəkət emalı bloklanmışdısa, onu açaq
+             if (isProcessingMove) { isProcessingMove = false; }
+             if (boardElement) boardElement.style.pointerEvents = 'auto'; // Lövhəni aktivləşdir
+        });
 
-// document.addEventListener('DOMContentLoaded', () => {
-//     ... (Part 1, 2, 3-dən kodlar) ...
+        // ----- Ümumi Oyun Xətası -----
+        socketInstance.on('game_error', (data) => {
+            const message = data?.message || 'Oyunda xəta baş verdi.';
+            console.error(`[Socket Event 4.3] >>> game_error alındı: ${message}`);
+            if(gameStatusDisplay) gameStatusDisplay.textContent = `XƏTA: ${message}`;
+            alert(`Oyunda xəta baş verdi: ${message}`);
+            if(boardElement) boardElement.style.pointerEvents = 'none';
+            // Modal açıqdırsa bağla
+            hideModal(editRoomModal);
+            hideModal(diceRollModal);
+            hideModal(symbolSelectModal);
+             // Düymələri yenidən aktivləşdirək? Bəlkə lazım deyil, onsuz da xəta var.
+        });
 
-function setupGameEventListeners(socketInstance) {
-    console.log("[Socket IO 4.1] setupGameEventListeners: Oyun hadisə dinləyiciləri quraşdırılır...");
-    // ... (Köhnə listenerları silmə kodu - Part 4.1-də) ...
-    // ... (game_state_update listener - Part 4.2-də) ...
-
-    // --------------------------------------------------------------------
-    // --- Part 4.3: Digər Socket Hadisə Handler-ları ---
-    // --------------------------------------------------------------------
-    // Qeyd: Oyun vəziyyəti xaricində serverdən gələn digər siqnalları
-    // (məlumat, xəta, yönləndirmə və s.) emal edən handler-lar.
-
-    // ----- Rəqib Oyundan Ayrıldı -----
-    // Qeyd: Bu hadisə, server `handleDisconnectOrLeave`-də oyunçu tapıb
-    // və otaqda başqa oyunçu qaldıqda göndərilir.
-    socketInstance.on('opponent_left_game', (data) => {
-        const opponentWhoLeft = data?.username || 'Rəqib';
-        console.log(`[Socket Event 4.3] >>> opponent_left_game alındı: ${opponentWhoLeft}`);
-        // Bu hadisə gəldikdə, server onsuz da yeni gameState göndərməlidir
-        // (isGameOver=true, statusMessage="Rəqib ayrıldı").
-        // Ona görə burada əsasən UI yeniləməsi etməyə ehtiyac qalmamalıdır.
-        // Sadəcə əlavə bildiriş göstərə bilərik.
-        if (gameStatusDisplay) {
-             // game_state_update onsuz da statusu yeniləyəcək, amma dərhal göstərək
-             gameStatusDisplay.textContent = `${escapeHtml(opponentWhoLeft)} oyundan ayrıldı.`;
-             gameStatusDisplay.className = 'game-status warning'; // Xəbərdarlıq stili
-        }
-         // Lokal state-i də yeniləyək (əgər hələ update gəlməyibsə)
-         isOpponentPresent = false;
-         opponentPlayerName = "Rəqib Gözlənilir...";
-         // isGameOver = true; // Bunu server state-i təyin etsin
-         // resetBoardAndStatus(); // Bunu server state-i təyin etsin
-         updatePlayerInfo(); // Rəqib adını yenilə
-         updateHeaderButtonsVisibility(); // "Call SNOW" görünə bilər
-         // Modalları bağla
-         hideModal(diceRollModal);
-         hideModal(symbolSelectModal);
-         if (restartGameBtn) restartGameBtn.disabled = true; // Rəqib yoxdursa, restart olmaz
-    });
-
-    // ----- Otaq Silindi / Kick Edildiniz -----
-    // Server bu hadisəni otaq silindikdə və ya istifadəçi kick edildikdə göndərir.
-    socketInstance.on('room_deleted_kick', (data) => {
-        const message = data?.message || 'Otaq silindi və ya otaqdan çıxarıldınız.';
-        console.warn(`[Socket Event 4.3] >>> room_deleted_kick alındı: ${message}`);
-        alert(message + "\nLobiyə yönləndirilirsiniz."); // İstifadəçiyə bildiriş
-        window.location.href = '../lobby/test_odalar.html'; // Lobiyə yönləndir
-    });
-
-    // ----- Lobiyə Məcburi Yönləndirmə -----
-    // Server hər hansı kritik xəta və ya otağın tapılmaması halında göndərə bilər.
-    socketInstance.on('force_redirect_lobby', (data) => {
-        const message = data?.message || 'Otaqla bağlı problem yarandı.';
-        console.warn(`[Socket Event 4.3] >>> force_redirect_lobby alındı: ${message}`);
-        alert(message + "\nLobiyə yönləndirilirsiniz.");
-        window.location.href = '../lobby/test_odalar.html';
-    });
-
-    // ----- Keçərsiz Hərəkət Bildirişi -----
-    // Client keçərsiz hərəkət etməyə çalışdıqda server göndərir.
-    socketInstance.on('invalid_move', (data) => {
-        const message = data?.message || 'Keçərsiz hərəkət!';
-        console.warn(`[Socket Event 4.3] >>> invalid_move alındı: ${message}`);
-        // İstəsək, bunu gameStatusDisplay-də müvəqqəti göstərə bilərik
-        // showMsg(gameStatusDisplay, message, 'error', 2000); // Məsələn, 2 saniyəlik
-        // Və ya sadəcə client tərəfi klikləri bloklamağa davam etsin
-    });
-
-    // ----- Ümumi Oyun Xətası -----
-    // Serverdə oyunla bağlı gözlənilməz xəta baş verdikdə göndərilir.
-    socketInstance.on('game_error', (data) => {
-        const message = data?.message || 'Oyunda xəta baş verdi.';
-        console.error(`[Socket Event 4.3] >>> game_error alındı: ${message}`);
-        // Bunu istifadəçiyə göstərmək vacibdir
-        if(gameStatusDisplay) gameStatusDisplay.textContent = `XƏTA: ${message}`;
-        alert(`Oyunda xəta baş verdi: ${message}`);
-        // Bəlkə oyunu bloklayaq?
-        // isGameOver = true; // Server state-i əsasdır
-        if(boardElement) boardElement.style.pointerEvents = 'none';
-    });
-
-    // ----- Məlumat Mesajı -----
-    // Serverdən gələn informativ mesajları göstərmək üçün (məsələn, restart təklifi göndərildi)
-    socketInstance.on('info_message', (data) => {
-         const message = data?.message || 'Serverdən məlumat.';
-         console.log(`[Socket Event 4.3] >>> info_message alındı: ${message}`);
-         // Bunu gameStatusDisplay-də göstərə bilərik (əgər oyun statusu ilə qarışmazsa)
-         if(gameStatusDisplay && !currentGameState.isGameOver) { // Yalnız oyun bitməyibsə göstər
+        // ----- Məlumat Mesajı -----
+        socketInstance.on('info_message', (data) => {
+             const message = data?.message || 'Serverdən məlumat.';
+             console.log(`[Socket Event 4.3] >>> info_message alındı: ${message}`);
+             // Bunu ayrıca bir bildiriş sahəsində göstərmək daha yaxşı olar
+             // Hələlik gameStatus-da göstərə bilərik (müvəqqəti)
              // showMsg(gameStatusDisplay, message, 'info', 3000);
-             // Və ya başqa bir elementdə göstər
-         }
-    });
+        });
 
-    // ----- İlkin Otaq Məlumatı -----
-    // 'player_ready_in_room' cavabı olaraq serverdən gəlir (əgər gameState yoxdursa)
-    socketInstance.on('room_info', (roomInfo) => {
-         console.log("[Socket Event 4.3] >>> room_info alındı:", roomInfo);
-         if(!roomInfo) return;
+        // ----- İlkin/Yenilənmiş Otaq Məlumatı -----
+        socketInstance.on('room_info', (roomInfo) => {
+             console.log("[Socket Event 4.3] >>> room_info alındı:", roomInfo);
+             if(!roomInfo) return;
 
-         // Bu məlumatlar əsasən client tərəfli vəziyyəti (düymələr vs.) ilkin təyin etmək üçündür.
-         // gameState gələndə onsuz da çoxu yenilənəcək.
-         currentRoomData = { ...currentRoomData, ...roomInfo }; // Lokal otaq məlumatını yenilə
+             currentRoomData = { ...currentRoomData, ...roomInfo }; // Lokal otaq məlumatını yenilə
 
-         if(roomInfo.creatorUsername && loggedInUser?.nickname) {
-             isCurrentUserCreator = (loggedInUser.nickname === roomInfo.creatorUsername);
-             console.log(`[State Update 4.3] Yaradıcı statusu təyin edildi: ${isCurrentUserCreator}`);
-         }
-         if(roomInfo.opponentUsername && !isOpponentPresent && loggedInUser && roomInfo.opponentUsername !== loggedInUser.nickname) {
-             isOpponentPresent = true;
-             opponentPlayerName = roomInfo.opponentUsername;
-             console.log(`[State Update 4.3] room_info-dan rəqib təyin edildi: ${opponentPlayerName}`);
-             updatePlayerInfo(); // UI-ni yenilə
-             // Zər atma modalını burada göstərmək? player_ready handler bunu edir.
-         }
-         updateHeaderButtonsVisibility(); // Düymələri yenilə
-    });
+             // Yaradan statusunu yenilə
+             if(roomInfo.creatorUsername && loggedInUser?.nickname) {
+                 const wasCreator = isCurrentUserCreator;
+                 isCurrentUserCreator = (loggedInUser.nickname === roomInfo.creatorUsername);
+                 if(isCurrentUserCreator !== wasCreator) {
+                     console.log(`[State Update 4.3] Yaradıcı statusu yeniləndi: ${isCurrentUserCreator}`);
+                 }
+             }
+             // Rəqib statusunu yenilə (bu opponent_left_game/game_state_update ilə də edilir)
+             const opponentJustJoined = roomInfo.opponentUsername && !isOpponentPresent;
+             isOpponentPresent = !!roomInfo.opponentUsername;
+             if (opponentJustJoined) {
+                  opponentPlayerName = roomInfo.opponentUsername;
+                  console.log(`[State Update 4.3] room_info-dan rəqib təyin edildi: ${opponentPlayerName}`);
+                  updatePlayerInfo();
+                  hideModal(diceRollModal); // Əgər açıq idisə bağla
+                  hideModal(symbolSelectModal);
+             }
+
+             // Otaq adını yenilə
+             if (roomNameDisplay) roomNameDisplay.textContent = `Otaq: ${escapeHtml(roomInfo.name || '?')}`;
+
+             // AI statusunu yenilə
+             const wasAI = isPlayingAgainstAI;
+             isPlayingAgainstAI = roomInfo.isAiRoom || false;
+              if(isPlayingAgainstAI !== wasAI) {
+                  console.log(`[State Update 4.3] AI oyun statusu yeniləndi: ${isPlayingAgainstAI}`);
+              }
+
+             updateHeaderButtonsVisibility(); // Düymələri yenilə
+
+             // Əgər otaq ayarları modalı açıqdırsa, onu bağlayaq (çünki məlumatlar yeniləndi)
+             // Bu, 'update_room_settings_result' ilə daha yaxşı idarə olunur.
+             // hideModal(editRoomModal);
+        });
+
+         // ----- Otaq Ayarları Yeniləmə Nəticəsi -----
+         socketInstance.on('update_room_settings_result', (result) => {
+             console.log("[Socket Event 4.3] >>> update_room_settings_result alındı:", result);
+             const msgElement = editRoomModal?.querySelector('#edit-room-message');
+             const saveBtn = editRoomModal?.querySelector('#save-room-changes-btn');
+             const deleteBtn = editRoomModal?.querySelector('#delete-room-confirm-btn');
+
+             if (result.success) {
+                 showMsg(msgElement, result.message || 'Ayarlar uğurla yeniləndi!', 'success', 2000);
+                 // Server onsuz da room_info və/və ya game_state_update göndərəcək.
+                 // Həmin hadisələr UI-ni yeniləyəcək. Sadəcə modalı bağlayaq.
+                 setTimeout(() => {
+                      hideModal(editRoomModal);
+                      // Düymələri yenidən aktivləşdirməyə ehtiyac yoxdur, modal bağlanır.
+                 }, 1500);
+             } else {
+                 showMsg(msgElement, result.message || 'Ayarları yeniləmək mümkün olmadı.', 'error');
+                 // Düymələri yenidən aktivləşdir
+                 if(saveBtn) saveBtn.disabled = false;
+                 if(deleteBtn) deleteBtn.disabled = false;
+             }
+         });
 
 
-    console.log("[Socket IO 4.1] Bütün oyun hadisə dinləyiciləri quraşdırıldı.");
+        console.log("[Socket IO 4.1] Bütün oyun hadisə dinləyiciləri quraşdırıldı.");
 
-}   // setupGameEventListeners funksiyasının sonu
+    } // <<<--- setupGameEventListeners funksiyasının BAĞLANMASI ---<<<
 
 
 // --- Hissə 4.3 Sonu ---
@@ -1867,14 +1821,10 @@ function setupGameEventListeners(socketInstance) {
     // ------------------------------------------------------------------------
     // --- Part 5.1: Oyunu Başlatma Funksiyası (Yenidən İşlənmiş) ---
     // ------------------------------------------------------------------------
-    // Qeyd: Səhifə yüklənəndə və autentifikasiya uğurlu olduqda çağırılır.
-    // İlkin UI quraşdırmasını edir və server bağlantısını başladır.
-    // Oyunun faktiki başlaması serverdən gələn 'game_state_update' ilə olacaq.
-
     /**
      * Oyun interfeysini ilkin olaraq qurur və serverə qoşulur.
      */
-    async function initializeGame() { // Yenidən async etdik (check-auth IIFE içində)
+    async function initializeGame() {
         console.log("[Client Init 5.1] initializeGame çağırıldı.");
         showLoadingOverlay('Oyun interfeysi qurulur...');
 
@@ -1883,14 +1833,14 @@ function setupGameEventListeners(socketInstance) {
             const params = getUrlParams();
             currentRoomId = params.roomId;
             const receivedRoomName = params.roomName;
-            const initialBoardSize = params.size; // Lövhə ölçüsü
-            const startWithAI = params.playWithAI; // Lobidən AI ilə başlama tələbi
+            const initialBoardSize = params.size;
+            const startWithAI = params.playWithAI;
 
             // İlkin qlobal dəyişənləri təyin et
-            boardSize = initialBoardSize; // Qlobal ölçünü təyin et
-            currentPlayerName = loggedInUser?.nickname || 'Siz'; // Auth-dan gələn ad
+            boardSize = initialBoardSize;
+            currentPlayerName = loggedInUser?.nickname || 'Siz';
 
-            // Əsas UI elementlərini yoxla (əgər hələ edilməyibsə)
+            // Əsas UI elementlərini yoxla
             if (!playerXNameDisplay || !playerONameDisplay || !roomNameDisplay) {
                  throw new Error("initializeGame: Əsas UI elementləri tapılmadı!");
             }
@@ -1898,66 +1848,48 @@ function setupGameEventListeners(socketInstance) {
             // İlkin UI məlumatlarını göstər
             playerXNameDisplay.textContent = currentPlayerName;
             roomNameDisplay.textContent = `Otaq: ${escapeHtml(receivedRoomName)}`;
-            playerONameDisplay.textContent = "Gözlənilir..."; // Başlanğıcda həmişə gözlənilir
+            playerONameDisplay.textContent = "Gözlənilir...";
 
             // Lövhəni yarat və stilləri tənzimlə
             adjustStylesForBoardSize(boardSize);
-            createBoard(); // Boş lövhəni yaradır
-            resetBoardAndStatus(); // Lövhənin görünüşünü və statusları sıfırla
+            createBoard();
+            // resetBoardAndStatus(); // Bu artıq lazım deyil, server state-i gələcək
 
-            // İlkin otaq məlumatlarını saxlayaq (serverdən gələnə qədər)
+            // İlkin otaq məlumatlarını saxlayaq
             currentRoomData = {
                  id: currentRoomId, name: receivedRoomName, boardSize: boardSize,
-                 isAiRoom: startWithAI, creatorUsername: '?', hasPassword: false
+                 isAiRoom: startWithAI, // AI ilə başladığını qeyd edək
+                 // digər məlumatlar serverdən gələcək
             };
+             isPlayingAgainstAI = startWithAI; // İlkin AI statusunu təyin et
 
             // --- Bağlantı və Oyun Başlatma Məntiqi ---
-            if (startWithAI) {
-                // Lobidən birbaşa AI oyunu seçilibsə
-                console.log("[Client Init 5.1] initializeGame: AI Oyunu (lobidən) hazırlanır...");
-                isPlayingAgainstAI = true;
-                opponentPlayerName = "SNOW";
-                isOpponentPresent = true; // AI rəqib sayılır
-                isCurrentUserCreator = true; // AI oyununda həmişə yaradan kimisən
-                updatePlayerInfo(); // Oyunçu adlarını göstər
-                updateHeaderButtonsVisibility(); // Düymələri göstər/gizlə
-                hideLoadingOverlay(); // Yükləmə ekranını gizlət
-
-                // TODO: Server-mərkəzli modeldə, əslində serverə AI oyunu başladılması tələbi göndərilməlidir.
-                // Server gameState yaradıb göndərməlidir. Hələlik lokal davam edirik:
-                console.warn("[Client Init 5.1] initializeGame: AI oyunu hələlik tam lokal başladılır (serverə bağlanmır).");
-                // Lokal olaraq zər atmanı başladaq?
-                handleCallSnow(); // Bu funksiya indi zər atmanı başlatmalıdır (əgər istəyiriksə)
-
-            } else {
-                // Normal Multiplayer Oyunu
-                console.log(`[Client Init 5.1] initializeGame: Multiplayer oyunu (${currentRoomId}) üçün serverə qoşulunur...`);
-                if (!currentRoomId) {
-                    throw new Error("Multiplayer oyunu üçün Otaq ID-si tapılmadı!");
-                }
-                isPlayingAgainstAI = false;
-                opponentPlayerName = "Rəqib Gözlənilir...";
-                isOpponentPresent = false; // Serverdən təsdiq gələnə qədər
-                isCurrentUserCreator = false; // Serverdən gələnə qədər
-                updatePlayerInfo();
-                updateHeaderButtonsVisibility(); // İlkin düymə vəziyyəti
-                if (gameStatusDisplay) gameStatusDisplay.textContent = 'Rəqib gözlənilir...';
-
-                // Socket bağlantısını qur (bu, içində hideLoadingOverlay çağıracaq)
-                setupGameSocketConnection(currentRoomId);
-                // Oyunun başlaması üçün serverdən 'game_state_update' gözlənilir.
+            // Həm AI, həm də Multiplayer üçün serverə qoşuluruq. Server AI oyununu idarə edəcək.
+            if (!currentRoomId) {
+                throw new Error("Oyun üçün Otaq ID-si tapılmadı!");
             }
 
-            console.log(`[Client Init 5.1] initializeGame: İlkin quraşdırma tamamlandı. AI=${isPlayingAgainstAI}`);
+            console.log(`[Client Init 5.1] initializeGame: Oyun (${currentRoomId}) üçün serverə qoşulunur... AI: ${isPlayingAgainstAI}`);
+            // opponentPlayerName = "Rəqib Gözlənilir..."; // Server state-i gələnə qədər
+            // isOpponentPresent = false;
+            // isCurrentUserCreator = false;
+            updatePlayerInfo(); // İlkin vəziyyəti göstər
+            updateHeaderButtonsVisibility(); // İlkin düymə vəziyyəti
+            if (gameStatusDisplay) gameStatusDisplay.textContent = 'Serverə qoşulunur...';
+
+            // Socket bağlantısını qur (bu, içində hideLoadingOverlay çağıracaq)
+            setupGameSocketConnection(currentRoomId);
+            // Oyunun başlaması üçün serverdən 'game_state_update' və 'room_info' gözlənilir.
+
+            console.log(`[Client Init 5.1] initializeGame: İlkin quraşdırma tamamlandı.`);
 
         } catch (initError) {
             console.error("[Client Init 5.1] initializeGame XƏTASI:", initError);
             hideLoadingOverlay();
-            // İstifadəçiyə kritik xəta barədə məlumat ver
             if(gameStatusDisplay) gameStatusDisplay.textContent = "Oyun yüklənərkən kritik xəta baş verdi!";
             if(turnIndicator) turnIndicator.textContent = "Xəta";
             alert("Oyun interfeysini qurarkən xəta baş verdi. Lobiyə yönləndirilirsiniz.");
-            // window.location.href = '../lobby/test_odalar.html'; // Lobiyə yönləndir
+             window.location.href = '../lobby/test_odalar.html';
         }
     } // initializeGame sonu
 
@@ -1977,79 +1909,46 @@ function setupGameEventListeners(socketInstance) {
     // ------------------------------------------------------------------------
     // --- Part 5.2: İlkin Autentifikasiya Yoxlaması (IIFE) ---
     // ------------------------------------------------------------------------
-    // Qeyd: Bu kod bloku səhifə yüklənən kimi avtomatik işə düşür (IIFE).
-    // Serverə /check-auth sorğusu göndərərək istifadəçinin giriş edib
-    // etmədiyini yoxlayır və nəticəyə görə ya oyunu başladır (initializeGame)
-    // ya da login səhifəsinə yönləndirir.
-
     (async () => {
         console.log("[Client Init 5.2] İlkin autentifikasiya yoxlaması (IIFE) başladı.");
         try {
             console.log("[Client Init 5.2] Serverə /check-auth sorğusu göndərilir...");
             showLoadingOverlay('Sessiya yoxlanılır...');
 
-            // Fetch API ilə /check-auth sorğusu
-            // Session cookie-si avtomatik olaraq brauzer tərəfindən göndərilir
-            // (əgər domain uyğunluğu varsa və httpOnly deyilsə).
-            // `credentials: 'include'` adətən fərqli domainlər üçün lazımdır,
-            // eyni domaində buna ehtiyac olmamalıdır.
-            const response = await fetch('/check-auth'); // credentials: 'include' olmadan cəhd edək
+            const response = await fetch('/check-auth', {
+                 credentials: 'include' // Session cookie göndərmək üçün vacib ola bilər
+            });
 
-            // Cavabı JSON olaraq al
             const data = await response.json();
 
-            // Cavabın uğurlu olub olmadığını və istifadəçi məlumatlarının gəlib gəlmədiyini yoxla
             if (!response.ok || !data.loggedIn || !data.user) {
                 console.error(`[Client Init 5.2] /check-auth xətası və ya giriş edilməyib: Status=${response.status}, loggedIn=${data.loggedIn}`);
-                // Xəta mesajını göstər və loginə yönləndir
                 alert("Sessiya tapılmadı və ya etibarsızdır. Zəhmət olmasa, yenidən giriş edin.");
-                // Login səhifəsinin düzgün yolu olduğundan əmin olun
                 window.location.href = '/ANA SEHIFE/login/login.html';
-                return; //initializeGame çağırılmasın
+                return;
             }
 
-            // Giriş uğurludursa, qlobal dəyişənləri təyin et
             loggedInUser = data.user;
-            currentPlayerName = loggedInUser.nickname; // Əsas oyunçu adını təyin et
+            currentPlayerName = loggedInUser.nickname;
             console.log(`[Client Init 5.2] Autentifikasiya uğurlu: ${loggedInUser.nickname} (UserID: ${loggedInUser.id})`);
 
             // Autentifikasiya uğurlu olduqdan sonra oyunu başlat
-            // initializeGame() funksiyasını çağır
-            await initializeGame(); // Bu funksiya indi async deyil, amma await qala bilər
+            await initializeGame();
 
         } catch (error) {
-            // /check-auth sorğusu zamanı şəbəkə xətası və ya digər gözlənilməz xəta baş verərsə
             console.error("[Client Init 5.2] Autentifikasiya yoxlaması zamanı kritik xəta:", error);
-            hideLoadingOverlay(); // Yükləmə ekranını gizlət
+            hideLoadingOverlay();
             alert("Sessiya yoxlanılarkən serverlə əlaqə qurmaq mümkün olmadı. İnternet bağlantınızı yoxlayın və ya daha sonra təkrar cəhd edin.");
-            // Bəlkə burada da login səhifəsinə yönləndirmək lazımdır?
-            // window.location.href = '/ANA SEHIFE/login/login.html';
+             window.location.href = '/ANA SEHIFE/login/login.html';
         }
     })(); // IIFE (Immediately Invoked Function Expression) sonu
 
     // ======================================================
     // === ƏSAS UI HADİSƏ DİNLƏYİCİLƏRİ                  ===
-    // ===         (Hissə 5.3-də olacaq)              ===
     // ======================================================
-
-// --- Hissə 5.2 Sonu (DOMContentLoaded bloku hələ bağlanmayıb!) ---
-// ------------------------------------------------------------------------
-// ========================================================================
-// public/OYUNLAR/tictactoe/game/oda_ici.js
-// Yenidən Qurulmuş v1 (Server-Mərkəzli Vəziyyətə Uyğunlaşdırılır)
-// ========================================================================
-
-// ... (Əvvəlki hissələrdən kodlar buradadır) ...
-
-document.addEventListener('DOMContentLoaded', () => {
-    // ... (Part 1, 2, 3, 4, 5.1, 5.2-dən kodlar) ...
-
     // ------------------------------------------------------------------------
     // --- Part 5.3: Əsas UI Hadisə Dinləyiciləri ---
     // ------------------------------------------------------------------------
-    // Qeyd: Düymələrə və digər interaktiv elementlərə klikləmə və s.
-    // hadisələrini müvafiq handler funksiyalarına bağlayır.
-
     console.log("[Client Init 5.3] Əsas UI hadisə dinləyiciləri əlavə edilir...");
 
     // Otaqdan Ayrıl Düyməsi
@@ -2057,12 +1956,10 @@ document.addEventListener('DOMContentLoaded', () => {
         leaveRoomBtn.addEventListener('click', () => {
             console.log("[UI Event 5.3] 'Otaqdan Ayrıl' klikləndi.");
             if (confirm("Otaqdan çıxmaq istədiyinizə əminsiniz?")) {
-                // AI oyunu deyilsə və socket bağlıdırsa, serverə bildir
-                if (!isPlayingAgainstAI && socket && socket.connected) {
+                if (socket && socket.connected) {
                      console.log("[UI Event 5.3] Serverə 'leave_room' göndərilir.");
                      socket.emit('leave_room');
                 }
-                // Hər halda lobiyə yönləndir
                 console.log("[UI Event 5.3] Lobiyə yönləndirilir...");
                 window.location.href = '../lobby/test_odalar.html';
             }
@@ -2072,7 +1969,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Yenidən Başlat Düyməsi
     if (restartGameBtn) {
-        restartGameBtn.addEventListener('click', () => handleRestartGame(false)); // handleRestartGame artıq yalnız təklif göndərir
+        restartGameBtn.addEventListener('click', handleRestartGame);
         console.log("[Client Init 5.3] -> restartGameBtn listener əlavə edildi.");
     } else { console.error("[Client Init 5.3] restartGameBtn tapılmadı!"); }
 
@@ -2080,19 +1977,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (editRoomBtn) {
         editRoomBtn.addEventListener('click', openEditModal);
         console.log("[Client Init 5.3] -> editRoomBtn listener əlavə edildi.");
-    } else { console.error("[Client Init 5.3] editRoomBtn tapılmadı!"); }
+    } else { console.warn("[Client Init 5.3] editRoomBtn tapılmadı!"); } // Xəta deyil, gizli ola bilər
 
     // Otaq Ayarları Modalı Bağlama (X)
     if (closeEditModalButton) {
         closeEditModalButton.addEventListener('click', () => hideModal(editRoomModal));
         console.log("[Client Init 5.3] -> closeEditModalButton listener əlavə edildi.");
-    } else { console.warn("[Client Init 5.3] closeEditModalButton tapılmadı (modal içində)."); }
+    } // else { console.warn("[Client Init 5.3] closeEditModalButton tapılmadı (modal içində)."); }
 
     // Modalın Kənarına Klikləmə (Ayarlar Modalı üçün)
     window.addEventListener('click', (event) => {
-        if (event.target == editRoomModal) {
-             hideModal(editRoomModal);
-        }
+        if (event.target == editRoomModal) { hideModal(editRoomModal); }
+        if (event.target == diceRollModal) { /* Zər modalı kənara kliklə bağlanmasın? */ }
+        if (event.target == symbolSelectModal) { /* Simvol modalı kənara kliklə bağlanmasın? */ }
     });
     console.log("[Client Init 5.3] -> window click listener (modal bağlama) əlavə edildi.");
 
@@ -2112,26 +2009,34 @@ document.addEventListener('DOMContentLoaded', () => {
     if (kickOpponentBtn) {
         kickOpponentBtn.addEventListener('click', handleKickOpponent);
         console.log("[Client Init 5.3] -> kickOpponentBtn listener əlavə edildi.");
-    } else { console.error("[Client Init 5.3] kickOpponentBtn tapılmadı!"); }
+    } else { console.warn("[Client Init 5.3] kickOpponentBtn tapılmadı!"); }
 
     // SNOW'u Çağır Düyməsi
     if (callSnowBtn) {
         callSnowBtn.addEventListener('click', handleCallSnow);
         console.log("[Client Init 5.3] -> callSnowBtn listener əlavə edildi.");
-    } else { console.error("[Client Init 5.3] callSnowBtn tapılmadı!"); }
+    } else { console.warn("[Client Init 5.3] callSnowBtn tapılmadı!"); }
 
-    // SNOW'u Çıxart Düyməsi (Yeni)
+    // SNOW'u Çıxart Düyməsi
     if (removeSnowBtn) {
         removeSnowBtn.addEventListener('click', handleRemoveSnow);
         console.log("[Client Init 5.3] -> removeSnowBtn listener əlavə edildi.");
-    } else { console.error("[Client Init 5.3] removeSnowBtn tapılmadı! HTML-ə əlavə etdinizmi?"); }
+    } else { console.warn("[Client Init 5.3] removeSnowBtn tapılmadı!"); }
 
-    // Zər Kubu Hadisələri (Mouse və Touch)
+    // Zər Kubu Hadisələri (Mouse və Touch - Listenerlar əvvəlki hissədə qlobal əlavə edilib)
     if (diceCubeElement) {
-        diceCubeElement.addEventListener('mousedown', handleMouseDown);
-        diceCubeElement.addEventListener('touchstart', handleTouchStart, { passive: false }); // passive:false vacibdir (preventDefault üçün)
-        console.log("[Client Init 5.3] -> diceCubeElement listenerları əlavə edildi.");
+        diceCubeElement.addEventListener('mousedown', handleMouseDown); // Klik və sürükləmə başlanğıcı
+        diceCubeElement.addEventListener('touchstart', handleTouchStart, { passive: false }); // Toxunma üçün
+        console.log("[Client Init 5.3] -> diceCubeElement listenerları (mousedown/touchstart) əlavə edildi.");
     } else { console.error("[Client Init 5.3] Zər kub elementi (diceCubeElement) tapılmadı!"); }
+
+    // Simvol Seçmə Düymələri
+    if (symbolOptionsDiv) {
+         symbolOptionsDiv.querySelectorAll('.symbol-button').forEach(button => {
+              button.addEventListener('click', handleSymbolChoice);
+         });
+         console.log("[Client Init 5.3] -> Simvol seçmə düymələrinə listenerlar əlavə edildi.");
+    } else { console.error("[Client Init 5.3] Simvol seçmə düymələri (symbolOptionsDiv) tapılmadı!"); }
 
     console.log("[Client Init 5.3] Bütün əsas UI listenerlarının əlavə edilməsi cəhdi bitdi.");
 

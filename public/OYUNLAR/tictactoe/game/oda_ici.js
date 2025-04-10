@@ -1618,7 +1618,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
                 // Bəlkə istifadəçiyə xəta göstərək?
                 if(gameStatusDisplay) gameStatusDisplay.textContent = "Serverdən keçərsiz məlumat alındı.";
                 return;
-            }
+            
 
             // --- Qlobal Vəziyyəti Yenilə ---
             // Əvvəlki state ilə müqayisə etmək üçün köhnəni saxlaya bilərik (optional)
@@ -1705,7 +1705,8 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             }
 
             console.log("[State Update 4.2] game_state_update emalı bitdi.");
-        }); // socketInstance.on('game_state_update', ...) sonu
+        } );
+         // socketInstance.on('game_state_update', ...) sonu
 
 
         // ======================================================
@@ -1847,7 +1848,7 @@ function setupGameEventListeners(socketInstance) {
 
     console.log("[Socket IO 4.1] Bütün oyun hadisə dinləyiciləri quraşdırıldı.");
 
-} // setupGameEventListeners funksiyasının sonu
+}   // setupGameEventListeners funksiyasının sonu
 
 
 // --- Hissə 4.3 Sonu ---
@@ -2133,6 +2134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else { console.error("[Client Init 5.3] Zər kub elementi (diceCubeElement) tapılmadı!"); }
 
     console.log("[Client Init 5.3] Bütün əsas UI listenerlarının əlavə edilməsi cəhdi bitdi.");
+
 
 }); // <<<--- DOMContentLoaded Listener-inin BAĞLANMASI ---<<<
 

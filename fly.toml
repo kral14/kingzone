@@ -1,0 +1,17 @@
+app = 'server-delicate-mountain-4709'
+primary_region = 'waw'
+
+[build] # Boşdur
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app'] # Defolt proses qrupu
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

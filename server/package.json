@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node server_multi.js", 
+    "start": "node server_multi.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -18,5 +18,8 @@
     "express-session": "^1.18.0",
     "pg": "^8.14.1",
     "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "@flydotio/dockerfile": "^0.7.10"
   }
 }

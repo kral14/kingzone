@@ -1,13 +1,11 @@
-# fly.toml app configuration file generated for server-delicate-mountain-4709 on 2025-04-10T17:55:21+04:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# fly.toml app configuration file for server-delicate-mountain-4709
+# See https://fly.io/docs/reference/configuration/
 
 app = 'server-delicate-mountain-4709'
 primary_region = 'waw'
 
 [build]
-  # Burada xüsusi build ayarları yoxdur, Dockerfile istifadə olunacaq
+  # Dockerfile istifadə olunacaq
 
 [http_service]
   internal_port = 8080
@@ -15,13 +13,12 @@ primary_region = 'waw'
   auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ['app'] # Aşağıdakı [processes] bölməsindəki 'app' prosesini işə salacaq
+  processes = ['app'] # Aşağıdakı [processes] içindəki 'app'-i işə sal
 
-# ----- YENİ ƏLAVƏ EDİLMİŞ BÖLMƏ -----
-# Tətbiqi başlatmaq üçün dəqiq əmri burada göstəririk
+# ----- BAŞLATMA ƏMRİNİ DƏQİQ GÖSTƏRİRİK -----
 [processes]
-  app = "node server/server_multi.js"
-# ----- YENİ ƏLAVƏ EDİLMİŞ BÖLMƏ SONU -----
+  app = "node server/server_multi.js" # Fayl server qovluğunda olduğu üçün
+# -----------------------------------------
 
 [[vm]]
   memory = '1gb'

@@ -17,4 +17,4 @@ EXPOSE 8080
 
 # Serveri işə salmaq üçün əmr
 # server_multi.js faylının 'server' qovluğunda olduğunu yoxlayın!
-CMD [ "node", "server/server_multi.js" ]
+CMD [ "node", "server_multi.js" ]

@@ -1705,7 +1705,7 @@ document.addEventListener('DOMContentLoaded', () => { // Async artıq lazım dey
             }
 
             console.log("[State Update 4.2] game_state_update emalı bitdi.");
-        } );
+        } ;
          // socketInstance.on('game_state_update', ...) sonu
 
 

@@ -4,22 +4,42 @@
 app = 'server-delicate-mountain-4709'
 primary_region = 'waw'
 
+# Build ayarları dəyişməz qaldı
 [build]
-  # Dockerfile istifadə olunacaq
-
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = 'stop'
-  auto_start_machines = true
-  min_machines_running = 0
-  processes = ['app'] # Aşağıdakı [processes] içindəki 'app'-i işə sal
 
 # ----- BAŞLATMA ƏMRİNİ DƏQİQ GÖSTƏRİRİK -----
 [processes]
   app = "node server/server_multi.js" # Fayl server qovluğunda olduğu üçün
 # -----------------------------------------
 
+# [[services]] istifadə edirik [http_service] əvəzinə
+[[services]]
+  internal_port = 8080 # Tətbiqinin dinlədiyi port
+  processes = ['app']  # Hansı prosesin bu servisi təmin etdiyi
+  protocol = 'tcp'     # Port üçün protokol
+  auto_stop_machines = 'stop' # Hələ də maşınları dayandıra bilər
+  auto_start_machines = true  # Hələ də maşınları başlada bilər
+  min_machines_running = 0    # Hələ də 0-a qədər azalda bilər
+
+  # Kənara açılan portlar (HTTP və HTTPS)
+  [[services.ports]]
+    handlers = ['http']
+    port = 80
+    force_https = true # HTTP-ni HTTPS-ə yönləndir
+
+  [[services.ports]]
+    handlers = ['tls', 'http'] # TLS (HTTPS) və HTTP handlerları
+    port = 443
+
+  # SAĞLAMLIQ YOXLAMASI - ƏLAVƏ EDİLDİ
+  [[services.tcp_checks]]
+    interval = '15s'      # Yoxlamalar arası interval
+    timeout = '2s'        # Qoşulma üçün gözləmə müddəti
+    grace_period = '5s'   # Tətbiq başladıqdan sonra ilk yoxlamadan əvvəl gözləmə müddəti (VACİB!)
+    restart_limit = 0     # Yoxlama uğursuz olsa maşını restart etmə (Fly özü idarə edəcək)
+# ---------------------------------------
+
+# VM ayarları dəyişməz qaldı
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'

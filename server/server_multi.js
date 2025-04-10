@@ -113,24 +113,6 @@ console.log(`[Setup 1.2] Session cookie ayarları: secure=${process.env.NODE_ENV
 app.use(express.json()); // Gələn JSON request body-lərini parse etmək üçün
 console.log('[Setup 1.2] Express JSON parser middleware tətbiq edildi.');
 
-// +++++++++++++ YENİ KOD BAŞLANĞICI +++++++++++++
-// Content Security Policy (CSP) başlığını təyin edən middleware
-app.use((req, res, next) => {
-  const cspValue = [
-    "default-src 'self'", // Defolt olaraq yalnız öz mənbəyindən
-    "script-src 'self'", // Skriptlər yalnız öz mənbəyindən
-    "connect-src 'self' wss://*.onrender.com", // API və WebSocket bağlantıları (Render üçün uyğunlaşdırılıb)
-    "img-src 'self' data:", // Şəkillər öz mənbəyindən və data:
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", // Stillər (Google Fonts daxil)
-    "font-src 'self' https://fonts.gstatic.com" // Şriftlər (Google Fonts daxil)
-  ].join('; '); // Direktivləri nöqtəli vergüllə birləşdir
-
-  res.setHeader('Content-Security-Policy', cspValue);
-  next(); // Növbəti middleware və ya marşruta keç
-});
-console.log('[Setup CSP] Content-Security-Policy middleware tətbiq edildi.');
-// +++++++++++++ YENİ KOD SONU ++++++++++++++
-
 // --- Sorğu Loglama Middleware ---
 app.use((req, res, next) => {
   // ... (loglama kodu əvvəlki kimi)

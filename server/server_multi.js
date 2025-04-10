@@ -688,18 +688,19 @@ console.log('[Setup 5.10] Socket.IO "connection" handler-i və bütün daxili di
 // ------------------------------------------------------------------------
 console.log('[Setup 6.1] Serverin başladılması və dayandırılması məntiqi təyin edilir...');
 // Multiplayer üçün port (əvvəlki kimi)
-const PORT = process.env.MULTIPLAYER_PORT || 10001;
+const PORT = process.env.PORT || 8080; // Fly.io üçün PORT dəyişəni və ya defolt 8080
 console.log(`[Server Start 6.1] server_multi.js listen(${PORT}) funksiyası ÇAĞIRILIR...`);
 
-server.listen(PORT, () => {
-    const startTime = new Date().toLocaleString('az-AZ', { timeZone: 'Asia/Baku' });
-    console.log('=======================================================');
-    console.log(`---- Multiplayer Server (Previous Based) ${PORT} portunda uğurla işə düşdü! ----`);
-    console.log(`---- Canlı Ünvan (təxmini): http://localhost:${PORT} ----`);
-    console.log(`---- Server Başlama Zamanı: ${startTime} ----`);
-    // createDefaultRooms(); // AI otaqları yaradılmır
-    broadcastRoomList();
-    console.log('=======================================================');
+// Serverin 0.0.0.0 ünvanında dinləməsini təmin et
+server.listen(PORT, '0.0.0.0', () => { // <-- '0.0.0.0' əlavə olundu
+  const startTime = new Date().toLocaleString('az-AZ', { timeZone: 'Asia/Baku' });
+  console.log('=======================================================');
+  console.log(`---- Multiplayer Server (Previous Based) ${PORT} portunda uğurla işə düşdü! ----`);
+  console.log(`---- Canlı Ünvan (təxmini): http://localhost:${PORT} ----`); // Bu localhost hələ də düzgün deyil, amma log üçündür
+  console.log(`---- Server Başlama Zamanı: ${startTime} ----`);
+  // createDefaultRooms(); // AI otaqları yaradılmır
+  broadcastRoomList();
+  console.log('=======================================================');
 });
 server.on('error', (error) => { console.error(`[Server Start 6.1] server.listen XƏTASI: Port ${PORT} problemi!`, error); if (error.code === 'EADDRINUSE') console.error(`XƏTA: Port ${PORT} artıq istifadə olunur.`); process.exit(1); });
 

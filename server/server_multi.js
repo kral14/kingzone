@@ -114,7 +114,7 @@ console.log('[Setup 1.2] Sadə sorğu loglama middleware tətbiq edildi.');
 
 // --- Statik Fayl Middleware ---
 // Render loglarına görə düzgün işləyən yol:
-const publicDirectoryPath = path.join(__dirname, 'public');
+const publicDirectoryPath = path.join(__dirname, '../public');
 app.use(express.static(publicDirectoryPath));
 console.log('[Setup 1.2] Static files middleware tətbiq edildi. Statik qovluq:', publicDirectoryPath);
 

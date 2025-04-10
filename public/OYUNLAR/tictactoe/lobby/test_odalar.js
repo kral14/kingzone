@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log("[DEBUG] Lobby JS: Əsas başlanğıc məntiqi başlayır.");
     try {
         console.log("[DEBUG] Lobby: /check-auth sorğusu göndərilir...");
-        const response = await fetch('/check-auth', { credentials: 'include' }); // credentials: 'include' əlavə edildi!
+        const response = await fetch('/check-auth'); // credentials: 'include' silindi
         console.log("[DEBUG] Lobby: /check-auth cavabı alındı. Status:", response.status);
 
         let data;

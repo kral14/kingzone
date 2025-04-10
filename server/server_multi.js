@@ -337,7 +337,11 @@ app.post('/login', async (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
 // ----- Çıxış Endpoint-i (/logout) -----
 app.post('/logout', (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
 // ----- Autentifikasiya Vəziyyətini Yoxlama Endpoint-i (/check-auth) -----
-app.get('/check-auth', (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
+app.get('/check-auth', (req, res) => {
+  console.log("[DEBUG] TEST /check-auth çağırıldı (həmişə success qaytarır)");
+  // Sessiyanı yoxlamadan, həmişə uğurlu və test user məlumatı qaytarırıq
+  res.status(200).json({ loggedIn: true, user: { id: 0, nickname: 'TEST_USER', fullName: 'Test User', email: 'test@user.com' } });
+});
 // ----- Profil Məlumatlarını Almaq Endpoint-i (/profile/:nickname) -----
 app.get('/profile/:nickname', isAuthenticated, async (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
 // ----- Profil Məlumatlarını Yeniləmək Endpoint-i (/profile/:nickname) -----

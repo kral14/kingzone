@@ -1333,3 +1333,96 @@ io.on('connection', (socket) => {
 // =========================
 // ===== PART 3 SONU =====
 // =========================
+// server_multi.js (Yenidən İşlənmiş - v1)
+// Part 4/4 - Server Start & Graceful Shutdown
+
+// ... (Part 1, 2 və 3-dən olan kodlar burada fərz edilir) ...
+
+// ------------------------------------------------------------------------
+// --- Serveri Başlatma & Səliqəli Dayandırma ---
+// ------------------------------------------------------------------------
+console.log('[Setup 6.1] Serverin başladılması və dayandırılması məntiqi təyin edilir...');
+
+// Fly.io üçün PORT mühit dəyişənini və ya default 8080-i istifadə et
+const PORT = process.env.PORT || 8080;
+console.log(`[Server Start 6.1] server_multi.js listen(${PORT}) funksiyası ÇAĞIRILIR...`);
+
+// Serverin dinləməyə başlaması
+// Host ünvanını göstərmədən default dinləməyə icazə veririk
+server.listen(PORT, () => { // <-- '0.0.0.0', hissəsi silindi
+  const startTime = new Date().toLocaleString('az-AZ', { timeZone: 'Asia/Baku' });
+  console.log('=======================================================');
+  // Log mesajını da bir az dəyişək ki, fərqi bilinsin
+  console.log(`---- Multiplayer Server (Yenidən İşlənmiş v1 - Hostsuz Listen) ${PORT} portunda uğurla işə düşdü! ----`);
+  console.log(`---- Fly App URL: https://${process.env.FLY_APP_NAME || 'YOUR_APP_NAME'}.fly.dev ----`);
+  console.log(`---- Server Başlama Zamanı: ${startTime} ----`);
+  // İlkin otaq siyahısını yayımla (əgər qoşulu client varsa)
+  broadcastRoomList();
+  console.log('=======================================================');
+});
+
+// Serveri başlatma zamanı yarana biləcək xətaları tutmaq üçün
+server.on('error', (error) => {
+    console.error(`[Server Start 6.1] server.listen XƏTASI: Port ${PORT} problemi!`, error);
+    if (error.code === 'EADDRINUSE') {
+        console.error(`XƏTA: Port ${PORT} artıq başqa bir proses tərəfindən istifadə olunur.`);
+    }
+    process.exit(1); // Kritik xəta, prosesdən çıx
+});
+
+// Serverin səliqəli dayandırılması üçün funksiya
+function gracefulShutdown(signal) {
+    console.warn(`\n[Shutdown 6.1] ${signal} siqnalı alındı. Server bağlanır...`);
+    // 1. Yeni bağlantıları qəbul etməyi dayandır
+    server.close((err) => {
+        if (err) {
+            console.error("[Shutdown 6.1] HTTP server bağlanarkən xəta:", err);
+            // Hər halda davam etməyə çalışaq
+        } else {
+            console.log('[Shutdown 6.1] HTTP server yeni bağlantıları qəbul etmir.');
+        }
+
+        // 2. Socket.IO bağlantılarını bağla
+        io.close(() => {
+            console.log('[Shutdown 6.1] Bütün Socket.IO bağlantıları bağlandı.');
+
+            // 3. Verilənlər bazası pool-unu bağla
+            pool.end((err) => {
+                if (err) {
+                    console.error("[Shutdown 6.1] DB pool bağlanarkən xəta:", err);
+                } else {
+                    console.log('[Shutdown 6.1] DB pool uğurla bağlandı.');
+                }
+                // 4. Prosesdən çıx
+                console.warn(`[Shutdown 6.1] Server dayandırıldı (${signal}).`);
+                process.exit(err ? 1 : 0); // Xəta varsa xəta kodu ilə çıx
+            });
+        });
+    });
+
+    // Əgər müəyyən müddət ərzində bağlanmazsa, məcburi çıxış et
+    setTimeout(() => {
+        console.error('[Shutdown 6.1] Shutdown prosesi çox uzun çəkdi! Məcburi çıxış edilir.');
+        process.exit(1);
+    }, 10000); // 10 saniyə gözlə
+}
+
+// Dayandırma siqnallarını dinlə
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM')); // `fly deploy` zamanı göndərilir
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));   // Ctrl+C basıldıqda
+
+// Tutulmayan xətaları logla və səliqəli dayandır
+process.on('uncaughtException', (error, origin) => {
+    console.error('[FATAL ERROR 6.1] Uncaught Exception:', error);
+    console.error('[FATAL ERROR 6.1] Origin:', origin);
+    // Bəlkə də dərhal çıxmaq daha yaxşıdır?
+    gracefulShutdown('uncaughtException');
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[FATAL ERROR 6.1] Unhandled Rejection at:', promise, 'reason:', reason);
+    gracefulShutdown('unhandledRejection');
+});
+
+// ============================================
+// ===== server_multi.js FAYLININ SONU ======
+// ============================================

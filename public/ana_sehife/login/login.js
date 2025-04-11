@@ -1,4 +1,4 @@
-// public/ANA SEHIFE/login/login.js (v2 - fetch API ilə)
+// public/ana_sehife/login/login.js (v2 - fetch API ilə)
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log("Login JS (v2 - fetch) Başladı.");
@@ -49,20 +49,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const result = await response.json(); // Serverdən gələn cavabı JSON olaraq al
 
-                if (response.ok) { // HTTP status kodu 200 OK
+                if (response.ok) { // HTTP status kodu 200-299
                     console.log('Giriş uğurlu:', result);
-                    // Session/Token olmadığı üçün sadəcə yönləndiririk
-                    // Uğurlu girişdən sonra oyunlar səhifəsinə yönləndir
-                    // Nickname-i URL parametri olaraq göndəririk
-                    const playerNameParam = encodeURIComponent(result.nickname || 'Qonaq');
-                     window.location.href = `../../OYUNLAR/oyunlar/oyunlar.html?playerName=${playerNameParam}`;
+                    
+                    // ----- YENİ ƏLAVƏ EDİLƏN SƏTİR -----
+                    if(loadingOverlay) loadingOverlay.classList.remove('visible'); 
+                    // ------------------------------------
 
-                    // Yönləndirmədən sonra overlayı gizlətməyə ehtiyac yoxdur
+                    // Uğurlu girişdən sonra oyunlar səhifəsinə yönləndir
+                    const playerNameParam = encodeURIComponent(result.nickname || 'Qonaq');
+                    // Yolu da düzəltdik (əgər ana_sehife istifadə edirsinizsə):
+                    window.location.href = `/oyunlar/oyunlar/oyunlar.html?playerName=${playerNameParam}`; 
+
+                    // Yönləndirmədən sonra overlayı gizlətməyə ehtiyac yoxdur (artıq etdik)
                 } else {
                     // Server xətası (məs. 400, 401, 500)
                     if (errorMessageDiv) errorMessageDiv.textContent = result.message || 'Giriş zamanı naməlum xəta baş verdi.';
-                    else alert(result.message || 'Giriş zamanı naməlum xəta baş verdi.'); // Fallback
-                    loadingOverlay.classList.remove('visible'); // Xəta varsa, overlayı gizlət
+                    else alert(result.message || 'Giriş zamanı naməlum xəta baş verdi.'); 
+                    
+                    // ----- BU SƏTİR BURADA QALIR (xəta halı üçün) -----
+                    if(loadingOverlay) loadingOverlay.classList.remove('visible'); // Xəta varsa, overlayı gizlət
+                    // -----------------------------------------------------
+
                     loginButton.disabled = false; // Düyməni aktiv et
                 }
 

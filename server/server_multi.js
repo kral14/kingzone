@@ -138,7 +138,7 @@ const isAuthenticated = (req, res, next) => {
         return res.status(401).json({ message: 'Bu əməliyyat üçün giriş tələb olunur.' });
    } else {
         // Bəlkə login səhifəsinə yönləndirmək daha yaxşıdır?
-        // return res.redirect('/ANA SEHIFE/login/login.html');
+        // return res.redirect('/ana_sehife/login/login.html');
         // Hələlik 401 qaytarırıq, client tərəfi yönləndirsin
         return res.status(401).send('Giriş tələb olunur.');
    }
@@ -331,24 +331,143 @@ function emitGameStateUpdate(roomId, triggeringEvent = 'N/A') {
 // Bu hissələr əvvəlki kodda olduğu kimi qalır, çünki işləyirdilər.
 // Yer qazanmaq üçün buraya daxil edilmir, amma faylda olmalıdırlar.
 // ----- Qeydiyyat Endpoint-i (/register) -----
-app.post('/register', async (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
+app.post('/register', async (req, res) => {
+    console.log('[Register DEBUG] Sorğu qəbul edildi. Body:', req.body); // Gələn datanı görək
+    const { fullName, email, nickname, password } = req.body;
+
+    // Əsas yoxlama
+    if (!fullName || !email || !nickname || !password || password.length < 6) {
+        console.log('[Register DEBUG] Əsas yoxlama uğursuz oldu.');
+        // Səhv formatda cavab göndərməmək üçün status kodunu və mesajı dəqiqləşdirək
+        return res.status(400).json({ success: false, message: 'Bütün sahələr doldurulmalı və şifrə minimum 6 simvol olmalıdır.' });
+    }
+
+    try {
+        console.log('[Register DEBUG] Mövcud istifadəçi yoxlanılır...');
+        const checkUser = await pool.query('SELECT id FROM users WHERE email = $1 OR nickname = $2 LIMIT 1', [email, nickname]);
+        console.log('[Register DEBUG] Mövcud istifadəçi yoxlaması tamamlandı. Tapılan sıra sayı:', checkUser.rows.length);
+
+        if (checkUser.rows.length > 0) {
+            console.log('[Register DEBUG] İstifadəçi artıq mövcuddur.');
+            // Hansı sahənin mövcud olduğunu dəqiqləşdirək (bu sorğu ilə dəqiq bilinmir, amma fərz edək)
+            // Əslində ayrı-ayrı yoxlamaq daha yaxşıdır, amma hələlik belə qalsın.
+            return res.status(409).json({ success: false, message: 'Bu email və ya nickname artıq mövcuddur.' });
+        }
+
+        console.log('[Register DEBUG] Parol hash edilir...');
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+        console.log('[Register DEBUG] Parol hash edilməsi tamamlandı.');
+
+        console.log('[Register DEBUG] Yeni istifadəçi bazaya əlavə edilir...');
+        const newUser = await pool.query(
+            'INSERT INTO users (full_name, email, nickname, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, nickname',
+            [fullName, email, nickname, hashedPassword]
+        );
+        console.log('[Register DEBUG] İstifadəçi əlavə edildi. Yeni istifadəçi:', newUser.rows[0]);
+
+        // Qeydiyyat uğurlu olduqda log verək (bu sətir onsuz da var idi)
+        console.log(`[Register] User registered: ${newUser.rows[0].nickname}`); 
+        res.status(201).json({ success: true, message: 'Qeydiyyat uğurlu!', nickname: newUser.rows[0].nickname });
+        console.log('[Register DEBUG] Uğurlu cavab göndərildi.'); // Cavab göndərildikdən sonra log
+
+    } catch (error) {
+        // Xəta baş verdikdə log verək (bu sətir onsuz da var idi)
+        console.error('[Register] Qeydiyyat zamanı verilənlər bazası xətası:', error); 
+        res.status(500).json({ success: false, message: 'Server xətası: Verilənlər bazası problemi.' });
+        console.log('[Register DEBUG] Xəta cavabı göndərildi.'); // Xəta cavabı göndərildikdən sonra log
+    }
+});
 // ----- Giriş Endpoint-i (/login) -----
-app.post('/login', async (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
-// ----- Çıxış Endpoint-i (/logout) -----
-app.post('/logout', (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
+app.post('/login', async (req, res) => {
+    console.log('[Login DEBUG] Sorğu qəbul edildi. Body:', req.body); 
+    const { nickname, password } = req.body;
+
+    if (!nickname || !password) {
+        console.log('[Login DEBUG] Boş nickname və ya parol.');
+        return res.status(400).json({ success: false, message: 'Nickname və şifrə daxil edilməlidir.' });
+    }
+
+    try {
+        console.log(`[Login DEBUG] İstifadəçi axtarılır: ${nickname}`);
+        // Ehtiyat üçün email ilə də axtarış əlavə edəkmi? Yoxsa yalnız nickname? Hələlik yalnız nickname.
+        // Nickname-in регистр fərqinə həssas olmamasını təmin edək (LOWERCASE ilə müqayisə)
+        const result = await pool.query('SELECT * FROM users WHERE LOWER(nickname) = LOWER($1)', [nickname]);
+        console.log('[Login DEBUG] Baza sorğusu tamamlandı. Tapılan sıra sayı:', result.rows.length);
+
+        if (result.rows.length === 0) {
+            console.log(`[Login DEBUG] İstifadəçi tapılmadı: ${nickname}`);
+            // İstifadəçiyə hansı sahənin səhv olduğunu bildirməmək daha təhlükəsizdir
+            return res.status(401).json({ success: false, message: 'Nickname və ya şifrə yanlışdır.' }); 
+        }
+
+        const user = result.rows[0];
+        console.log('[Login DEBUG] İstifadəçi tapıldı:', { id: user.id, nickname: user.nickname }); 
+
+        console.log('[Login DEBUG] Parol müqayisə edilir...');
+        const match = await bcrypt.compare(password, user.password_hash);
+        console.log('[Login DEBUG] Parol müqayisəsi tamamlandı. Nəticə:', match);
+
+        if (match) {
+            // Parol düzgündür, sessiyanı qur
+            console.log('[Login DEBUG] Parol düzgündür. Sessiya yaradılır...');
+            // Sessiyaya lazım olan user məlumatlarını yazaq
+            req.session.user = { 
+                id: user.id, 
+                nickname: user.nickname,
+                fullName: user.full_name, 
+                email: user.email        
+            }; 
+            // Sessiyanın yadda saxlanmasını gözləmək lazım deyil adətən, amma əmin olmaq üçün save() çağıra bilərik
+            req.session.save(err => {
+                if (err) {
+                    console.error('[Login] Sessiya yadda saxlanarkən xəta:', err);
+                    return res.status(500).json({ success: false, message: 'Server xətası: Sessiya problemi.' });
+                }
+                console.log('[Login DEBUG] Sessiya yaradıldı və yadda saxlandı:', req.session.user);
+                // Uğurlu cavabı göndər
+                res.json({ 
+                    success: true, 
+                    message: 'Giriş uğurludur!', 
+                    nickname: user.nickname // Clientin yönləndirmə üçün istifadə etdiyi nickname
+                });
+                console.log('[Login DEBUG] Uğurlu cavab göndərildi.');
+            });
+
+        } else {
+            // Parol səhvdir
+            console.log('[Login DEBUG] Parol səhvdir.');
+            res.status(401).json({ success: false, message: 'Nickname və ya şifrə yanlışdır.' });
+            console.log('[Login DEBUG] Parol səhvdir cavabı göndərildi.');
+        }
+
+    } catch (error) {
+        console.error('[Login] Login zamanı xəta:', error); 
+        res.status(500).json({ success: false, message: 'Server xətası baş verdi.' });
+        console.log('[Login DEBUG] Server xətası cavabı göndərildi.');
+    }
+});
+
 // ----- Autentifikasiya Vəziyyətini Yoxlama Endpoint-i (/check-auth) -----
 app.get('/check-auth', (req, res) => {
-  console.log("[DEBUG] TEST /check-auth çağırıldı (həmişə success qaytarır)");
-  // Sessiyanı yoxlamadan, həmişə uğurlu və test user məlumatı qaytarırıq
-  res.status(200).json({ loggedIn: true, user: { id: 0, nickname: 'TEST_USER', fullName: 'Test User', email: 'test@user.com' } });
+    // Real sessiyanı yoxlayırıq
+    if (req.session && req.session.user && req.session.user.id) {
+        // Sessiyada user varsa, həmin user məlumatını qaytaraq
+        console.log(`[/check-auth] SUCCESS - User found in session: ${req.session.user.nickname}`);
+        res.status(200).json({ 
+            loggedIn: true, 
+            user: req.session.user // Sessiyadakı user məlumatlarını göndər
+        });
+    } else {
+        // Sessiyada user yoxdursa, uğursuz cavab qaytaraq
+        console.log('[/check-auth] FAILED - No user in session.');
+        // Status 200 OK qaytarıb, loggedIn: false demək daha doğrudur, çünki 401 xətası Console-da görünə bilər
+        res.status(200).json({ loggedIn: false, user: null }); 
+        // Əvvəl 401 idi, amma client tərəfi onsuz da loggedIn dəyərini yoxlayır.
+    }
 });
-// ----- Profil Məlumatlarını Almaq Endpoint-i (/profile/:nickname) -----
-app.get('/profile/:nickname', isAuthenticated, async (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
-// ----- Profil Məlumatlarını Yeniləmək Endpoint-i (/profile/:nickname) -----
-app.put('/profile/:nickname', isAuthenticated, async (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
-// ----- Default Kök Route (/) -----
-app.get('/', (req, res) => { /* ... ƏVVƏLKİ KOD ... */ });
 
+// ----- Çıxış Endpoint-i (/logout) ----- 
+// (Bunun altına və ya başqa uyğun yerə əlavə edin)
 // =========================
 // ===== PART 1 SONU =====
 // =========================

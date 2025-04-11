@@ -1,4 +1,4 @@
-// public/ANA SEHIFE/register/register.js (v2 - fetch API ilə)
+// public/ana_sehife/register/register.js (v2 - fetch API ilə)
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log("Register JS (v2 - fetch) Başladı.");

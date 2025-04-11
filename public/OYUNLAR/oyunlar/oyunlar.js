@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => { // async burdan silinir, s
 
             if (!response.ok || !data.loggedIn) {
                 console.log("Oyunlar JS: Giriş edilməyib (check-auth), login səhifəsinə yönləndirilir...");
-                window.location.href = '/ANA SEHIFE/login/login.html'; // Başdakı ../../ silindi, / əlavə edildi
+                window.location.href = '/ana_sehife/login/login.html'; // Başdakı ../../ silindi, / əlavə edildi
                 return;
             }
 
@@ -70,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => { // async burdan silinir, s
         } catch (error) {
             console.error("Oyunlar JS: Auth yoxlama xətası:", error);
             alert("Sessiya yoxlanılarkən xəta baş verdi. Giriş səhifəsinə yönləndirilirsiniz.");
-            window.location.href = '/ANA SEHIFE/login/login.html';
+            window.location.href = '/ana_sehife/login/login.html';
         }
     }, 500); // <<<--- 500 millisaniyə (yarım saniyə) gözləmə müddəti
     // =====================================================
@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => { // async burdan silinir, s
             const response = await fetch('/logout', { method: 'POST', credentials: 'include' });
             const result = await response.json();
             if (response.ok) {
-                console.log("Uğurla çıxış edildi."); window.location.href = '../../ANA SEHIFE/login/login.html';
+                console.log("Uğurla çıxış edildi."); window.location.href = '../../ana_sehife/login/login.html';
             } else { console.error("Çıxış xətası:", result.message); alert(`Çıxış zamanı xəta: ${result.message || 'Naməlum xəta'}`); }
         } catch (error) { console.error("Çıxış fetch xətası:", error); alert("Serverlə əlaqə qurmaq mümkün olmadı."); }
     }

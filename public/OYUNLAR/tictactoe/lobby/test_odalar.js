@@ -93,7 +93,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (!response.ok || !data.loggedIn || !data.user) {
             console.warn("[DEBUG] Lobby JS: Giriş edilməyib və ya auth xətası. Login səhifəsinə yönləndirilir. Data:", data);
-            window.location.href = '/ANA SEHIFE/login/login.html';
+            window.location.href = '/ana_sehife/login/login.html';
             // Yönləndirmədən sonra kodun davam etməməsi üçün return əlavə edək
             return;
         }
@@ -101,7 +101,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Autentifikasiya uğurlu oldu
         loggedInUser = data.user;
         console.log(`[DEBUG] Lobby JS: Autentifikasiya uğurlu: ${loggedInUser.nickname}`);
-        if (userInfoPlaceholder) userInfoPlaceholder.textContent = `İstifadəçi: ${escapeHtml(loggedInUser.nickname)}`;
+      // if (userInfoPlaceholder) userInfoPlaceholder.textContent = `İstifadəçi: ${escapeHtml(loggedInUser.nickname)}`;
         if (welcomeText) welcomeText.innerHTML = `Xoş gəldin, <strong>${escapeHtml(loggedInUser.nickname)}</strong>! Oyuna qatmaq üçün otaq seçin və ya yenisini yaradın.`;
 
         // Auth uğurlu olduqdan sonra Socket və Listenerları quraşdır
@@ -113,8 +113,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (error) {
         console.error("[DEBUG] Lobby JS: Başlanğıc zamanı KÖK XƏTA:", error);
         alert(`Lobby yüklənərkən xəta baş verdi. Serverə qoşulmaq mümkün olmaya bilər.\n\nXəta: ${error.message}`);
-        if (userInfoPlaceholder) { userInfoPlaceholder.textContent = "Xəta!"; userInfoPlaceholder.style.color = "var(--danger-color)"; }
-        if (infoMessageArea) { infoMessageArea.textContent = "Lobby yüklənərkən xəta baş verdi."; infoMessageArea.style.color = "var(--danger-color)"; }
+       // if (userInfoPlaceholder) { userInfoPlaceholder.textContent = "Xəta!"; userInfoPlaceholder.style.color = "var(--danger-color)"; }
+        //if (infoMessageArea) { infoMessageArea.textContent = "Lobby yüklənərkən xəta baş verdi."; infoMessageArea.style.color = "var(--danger-color)"; }
     }
 
     console.log("[DEBUG] Lobby JS faylının sonu.");

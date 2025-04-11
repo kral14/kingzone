@@ -1170,7 +1170,7 @@ function setupGameEventListeners(socketInstance) {
             if (!response.ok || !data.loggedIn || !data.user) {
                 console.error(`[Client Init 5.2] /check-auth xətası və ya giriş edilməyib.`);
                 alert("Sessiya tapılmadı və ya etibarsızdır. Giriş edin.");
-                window.location.href = '/ANA SEHIFE/login/login.html';
+                window.location.href = '/ana_sehife/login/login.html';
                 return;
             }
             loggedInUser = data.user;
@@ -1181,7 +1181,7 @@ function setupGameEventListeners(socketInstance) {
             console.error("[Client Init 5.2] Autentifikasiya xətası:", error);
             hideLoadingOverlay();
             alert("Sessiya yoxlanılarkən xəta. İnternetinizi yoxlayın.");
-             window.location.href = '/ANA SEHIFE/login/login.html';
+             window.location.href = '/ana_sehife/login/login.html';
         }
     })(); // IIFE sonu
 

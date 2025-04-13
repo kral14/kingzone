@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Uğurlu girişdən sonra oyunlar səhifəsinə yönləndir
                     const playerNameParam = encodeURIComponent(result.nickname || 'Qonaq');
                     // Yolu da düzəltdik (əgər ana_sehife istifadə edirsinizsə):
-                    window.location.href = `/oyunlar/oyunlar/oyunlar.html?playerName=${playerNameParam}`; 
+                    window.location.href = `/OYUNLAR/oyunlar/oyunlar.html?playerName=${playerNameParam}`; 
 
                     // Yönləndirmədən sonra overlayı gizlətməyə ehtiyac yoxdur (artıq etdik)
                 } else {

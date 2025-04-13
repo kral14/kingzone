@@ -23,7 +23,7 @@ echo == Fly.io Deployment Basladilir ==
 echo =================================
 echo Fly.io-ya deploy edilir (flyctl deploy)...
 rem === Flyctl yolunu ve app adini yoxlayin ===
-"C:\flyctl\flyctl.exe" deploy -a kingzone
+"C:\Users\nesib\.fly\bin\flyctl.exe" deploy -a kingzone
 echo.
 
 echo ===============================
@@ -31,7 +31,7 @@ echo == Fly.io Loglari Gosterilir ==
 echo ===============================
 echo Loglari dayandirmaq ucun Ctrl+C basin.
 rem === Flyctl yolunu ve app adini yoxlayin ===
-"C:\flyctl\flyctl.exe" logs -a kingzone
+"C:\Users\nesib\.fly\bin\flyctl.exe" logs -a kingzone
 
 echo.
 echo Emeliyyatlar bitdi (Loglardan sonra gorunecek).

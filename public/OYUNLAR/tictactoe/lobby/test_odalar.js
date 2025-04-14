@@ -48,7 +48,109 @@ document.addEventListener('DOMContentLoaded', async () => {
     function handleRoomClick(room) { /* ... v5 kodu ... */ console.log(`[DEBUG] handleRoomClick çağırıldı: Room ID=${room.id}, Şifrəli=${room.hasPassword}`); if (!socket || !socket.connected) { alert("Serverlə bağlantı yoxdur."); return; } if (!room || !room.id) { console.error("handleRoomClick: Keçərsiz otaq!"); return; } if (room.isAiRoom) { console.log(`AI otağı (${room.id}) artıq dəstəklənmir.`); alert("AI otaqları hazırda dəstəklənmir."); return; } if (room.playerCount >= 2) { console.warn("Dolu otağa klikləndi?"); return; } if (room.hasPassword) { if (joinRoomIdInput) joinRoomIdInput.value = room.id; if (joinRoomTitle) joinRoomTitle.textContent = `Otağa Qoşul: ${escapeHtml(room.name)}`; if (joinRoomPasswordInput) joinRoomPasswordInput.value = ''; if (joinRoomMessage) joinRoomMessage.textContent = ''; joinRoomMessage.className = 'message'; if(joinRoomSubmitBtn) joinRoomSubmitBtn.disabled = false; showModal(joinRoomModal); } else { console.log(`[DEBUG] Emitting 'join_room' for room ${room.id}`); socket.emit('join_room', { roomId: room.id }); } }
 
     // --- Socket.IO Bağlantısı Qurulumu ---
-    function setupSocketConnection() { /* ... v5 kodu ... */ if (socket && socket.connected) { socket.disconnect(); } console.log("[DEBUG] Yeni Socket.IO bağlantısı qurulur..."); socket = io({ transports: ['websocket'], reconnectionAttempts: 5 }); socket.on('connect', () => { console.log('[DEBUG] Socket.IO Serverinə qoşuldu! ID:', socket.id); if (infoMessageArea) { infoMessageArea.textContent = 'Serverdən otaq siyahısı alınır...'; infoMessageArea.style.color = 'var(--subtle-text)';} }); socket.on('disconnect', (reason) => { console.warn('[DEBUG] Socket.IO bağlantısı kəsildi:', reason); if (infoMessageArea) { infoMessageArea.textContent = 'Serverlə bağlantı kəsildi...'; infoMessageArea.style.color = 'var(--warning-color)';} displayRooms([]); }); socket.on('connect_error', (error) => { console.error('[DEBUG] Socket.IO qoşulma xətası:', error.message); if (infoMessageArea) { infoMessageArea.textContent = 'Serverə qoşulmaq mümkün olmadı.'; infoMessageArea.style.color = 'var(--danger-color)';} displayRooms([]); }); socket.on('room_list_update', (roomsFromServer) => { /* ... v5 kodu ... */ console.log('[DEBUG] room_list_update alındı, Otaq sayı:', roomsFromServer?.length ?? 0); currentRooms = {}; if(Array.isArray(roomsFromServer)) { roomsFromServer.forEach(room => { if(room && room.id) currentRooms[room.id] = room; else console.warn("[DEBUG] Keçərsiz otaq datası:", room); }); displayRooms(Object.values(currentRooms)); } else { console.error("[DEBUG] room_list_update: Array gözlənilirdi!", roomsFromServer); displayRooms([]); } }); socket.on('creation_error', (errorMessage) => { console.error('[DEBUG] Otaq yaratma xətası:', errorMessage); showMsg(createRoomMessage, errorMessage, 'error'); if(createRoomSubmitBtn) createRoomSubmitBtn.disabled = false; }); socket.on('join_error', (errorMessage) => { console.error('[DEBUG] Otağa qoşulma xətası:', errorMessage); showMsg(joinRoomMessage, errorMessage, 'error'); if(joinRoomSubmitBtn) joinRoomSubmitBtn.disabled = false; }); socket.on('delete_error', (errorMessage) => { console.error('[DEBUG] Otaq silmə xətası:', errorMessage); alert(`Otaq silinərkən xəta: ${errorMessage}`); }); socket.on('room_joined', (data) => { console.log(`[DEBUG] Otağa uğurla qoşuldunuz: ${data.roomName} (${data.roomId})`); hideModal(joinRoomModal); const params = new URLSearchParams({ roomId: data.roomId, roomName: encodeURIComponent(data.roomName), size: data.boardSize }); window.location.href = `../game/oda_ici.html?${params.toString()}`; }); console.log("[DEBUG] Socket listeners quraşdırıldı."); }
+    function setupSocketConnection() {
+        /* ... v5 kodu ... */ // Bu komment sətri sizin orijinal kodunuzda varsa saxlayın, yoxdursa silə bilərsiniz.
+    
+        // Əgər mövcud bağlantı varsa, onu kəsək
+        if (socket && socket.connected) {
+            socket.disconnect();
+        }
+    
+        console.log("[DEBUG] Yeni Socket.IO bağlantısı qurulur...");
+        socket = io({
+            transports: ['websocket'], // Yalnız WebSocket istifadə etməyə çalış
+            reconnectionAttempts: 5    // 5 dəfə yenidən qoşulmağa cəhd etsin
+        });
+    
+        // Bağlantı uğurlu olduqda
+        socket.on('connect', () => {
+            console.log('[DEBUG] Socket.IO Serverinə qoşuldu! ID:', socket.id);
+            if (infoMessageArea) { // infoMessageArea elementi mövcuddursa
+                infoMessageArea.textContent = 'Serverdən otaq siyahısı alınır...';
+                infoMessageArea.style.color = 'var(--subtle-text)'; // CSS dəyişəni ilə rəngləmə
+            }
+            // İlkin otaq siyahısını tələb etmək üçün burada emit edə bilərsiniz (əgər server dəstəkləyirsə)
+            // socket.emit('requestRoomList'); // Serverdə `socket.on('requestRoomList', ...)` olmalıdır
+        });
+    
+        // Bağlantı kəsildikdə
+        socket.on('disconnect', (reason) => {
+            console.warn('[DEBUG] Socket.IO bağlantısı kəsildi:', reason);
+            if (infoMessageArea) { // infoMessageArea elementi mövcuddursa
+                infoMessageArea.textContent = 'Serverlə bağlantı kəsildi...';
+                infoMessageArea.style.color = 'var(--warning-color)'; // CSS dəyişəni ilə rəngləmə
+            }
+            displayRooms([]); // Otaq siyahısını boş göstər
+        });
+    
+        // Qoşulma zamanı xəta baş verdikdə
+        socket.on('connect_error', (error) => {
+            console.error('[DEBUG] Socket.IO qoşulma xətası:', error.message);
+            if (infoMessageArea) { // infoMessageArea elementi mövcuddursa
+                infoMessageArea.textContent = 'Serverə qoşulmaq mümkün olmadı.';
+                infoMessageArea.style.color = 'var(--danger-color)'; // CSS dəyişəni ilə rəngləmə
+            }
+            displayRooms([]); // Otaq siyahısını boş göstər
+        });
+    
+        // --- DƏYİŞİKLİK BURADADIR ---
+        // Serverdən gələn otaq siyahısı yeniləməsini dinlə
+        socket.on('roomList', (roomsFromServer) => { // 'room_list_update' -> 'roomList' olaraq dəyişdirildi
+            /* ... v5 kodu ... */ // Bu komment sətri sizin orijinal kodunuzda varsa saxlayın, yoxdursa silə bilərsiniz.
+            console.log('[DEBUG] roomList alındı, Otaq sayı:', roomsFromServer?.length ?? 0); // Log mesajını da dəyişdim
+            currentRooms = {}; // Mövcud otaqları sıfırla
+            if (Array.isArray(roomsFromServer)) { // Gələn datanın massiv olduğundan əmin ol
+                roomsFromServer.forEach(room => {
+                    if (room && room.id) { // Otaq datası və ID mövcuddursa
+                        currentRooms[room.id] = room; // Obyektə əlavə et
+                    } else {
+                        console.warn("[DEBUG] Keçərsiz otaq datası:", room);
+                    }
+                });
+                displayRooms(Object.values(currentRooms)); // UI-da göstər
+            } else {
+                // Gözlənilən data formatı gəlmədikdə xəta ver
+                console.error("[DEBUG] roomList: Array gözlənilirdi!", roomsFromServer);
+                displayRooms([]); // Otaq siyahısını boş göstər
+            }
+        });
+        // --- DƏYİŞİKLİK SONU ---
+    
+        // Otaq yaradılmasında xəta olduqda
+        socket.on('creation_error', (errorMessage) => {
+            console.error('[DEBUG] Otaq yaratma xətası:', errorMessage);
+            showMsg(createRoomMessage, errorMessage, 'error'); // Mesaj göstər
+            if (createRoomSubmitBtn) createRoomSubmitBtn.disabled = false; // Düyməni aktiv et
+        });
+    
+        // Otağa qoşulmada xəta olduqda
+        socket.on('join_error', (errorMessage) => {
+            console.error('[DEBUG] Otağa qoşulma xətası:', errorMessage);
+            showMsg(joinRoomMessage, errorMessage, 'error'); // Mesaj göstər
+            if (joinRoomSubmitBtn) joinRoomSubmitBtn.disabled = false; // Düyməni aktiv et
+        });
+    
+        // Otaq silinməsində xəta olduqda (əgər belə bir funksiya varsa)
+        socket.on('delete_error', (errorMessage) => {
+            console.error('[DEBUG] Otaq silmə xətası:', errorMessage);
+            alert(`Otaq silinərkən xəta: ${errorMessage}`);
+        });
+    
+        // Otağa uğurla qoşulduqda (serverdən gələn cavab)
+        socket.on('room_joined', (data) => {
+            console.log(`[DEBUG] Otağa uğurla qoşuldunuz: ${data.roomName} (${data.roomId})`);
+            hideModal(joinRoomModal); // Qoşulma modal pəncərəsini bağla (əgər varsa)
+            // Oyun səhifəsinə yönləndir
+            const params = new URLSearchParams({
+                roomId: data.roomId,
+                roomName: encodeURIComponent(data.roomName), // Adında xüsusi simvollar ola bilər
+                size: data.boardSize // Oyun lövhəsinin ölçüsü (əgər varsa)
+            });
+            window.location.href = `../game/oda_ici.html?${params.toString()}`;
+        });
+    
+        console.log("[DEBUG] Socket listeners quraşdırıldı.");
+    } // setupSocketConnection funksiyasının sonu
 
     // ---- Event Listenerları Quraşdırma Funksiyası ----
     function attachLobbyEventListeners() {

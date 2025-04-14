@@ -667,14 +667,13 @@ io.on('connection', (socket) => { // <<< --- ƏSAS BAĞLANTI BLOKU BAŞLAYIR (H�
     */
 
     // Yeni qoşulan istifadəçini qlobal `users` obyektinə əlavə et
-    // Əgər eyni userId ilə başqa socketId varsa, onu silmək daha yaxşıdır
+    /// Köhnə bağlantı yoxlaması - users[] obyektindən silmə
     Object.keys(users).forEach(existingSocketId => {
-        if (users[existingSocketId].userId === connectedUser.id) {
-             console.warn(`[Socket Connect 4.2] Existing socket found for UserID ${connectedUser.id}. Removing old entry: ${existingSocketId}`);
-             // Köhnə socketi məcbur disconnect etmək də olar:
-             // const oldSocket = io.sockets.sockets.get(existingSocketId);
-             // if (oldSocket) oldSocket.disconnect(true);
-             delete users[existingSocketId];
+    if (users[existingSocketId].userId === connectedUser.id && existingSocketId !== socket.id) {
+         console.warn(`[Socket Connect 4.2 DEBUG] Existing socket found for UserID ${connectedUser.id}. Removing old USERS entry: ${existingSocketId}. New socket: ${socket.id}`); // <<< YENI LOG
+         // const oldSocket = io.sockets.sockets.get(existingSocketId);
+         // if (oldSocket) oldSocket.disconnect(true); // Bunu hələ aktiv etməyək
+         delete users[existingSocketId];
         }
     });
     // Yenisini əlavə et
@@ -1047,6 +1046,8 @@ console.log('--- Part 5/7 Tamamlandı (io.on("connection") bloku hələ də aç�
                    console.log(`[player_ready v12] Old socket ${oldSocketId} not found, maybe already disconnected.`);
              }
              // İndi yeni socketi qəbul et
+             console.log(`[player_ready v12 DEBUG] Accepting NEW socket ${socketId} for user ${username}.`); // <<< YENI LOG
+             playerState.socketId = socketId; 
              playerState.socketId = socketId; // Socket ID-ni yenilə
              playerState.isDisconnected = false; // Aktiv et
              playerState.username = username; // Adı yenilə (hər ehtimala qarşı)

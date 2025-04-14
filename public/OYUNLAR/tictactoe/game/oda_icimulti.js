@@ -1165,11 +1165,12 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             // Socket.IO clientini başlat (withCredentials əlavə olundu)
             socket = io({
+                transports: ['websocket'], // <<<---- BUNU ƏLAVƏ EDİN
                 reconnectionAttempts: 5,
                 reconnectionDelay: 1000,
                 reconnectionDelayMax: 5000,
                 timeout: 10000,
-                withCredentials: true // <<<---- ƏVVƏLKİ ADDIMDA ƏLAVƏ EDİLMİŞDİ ----<<<
+                withCredentials: true 
             });
             console.log("[OdaIci Client v4-logs | Socket Setup] Socket.IO client obyekti yaradıldı (withCredentials: true ilə).");
 
@@ -1211,6 +1212,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateRestartButtonsUI();
 
                 if (reason === 'io server disconnect') {
+                    console.error("!!! ALERT GÖSTƏRİLİR !!! Çünki reason === 'io server disconnect'. Actual reason:", reason);
                      console.log("[OdaIci Client v4-logs | Socket Event] Server tərəfindən disconnect edildiyi üçün yenidən qoşulma dayandırıldı.");
                      alert("Server bağlantını kəsdi (məs. başqa cihazdan giriş). Lobiyə yönləndirilirsiniz.");
                      window.location.href = '../lobby/test_odalar.html';

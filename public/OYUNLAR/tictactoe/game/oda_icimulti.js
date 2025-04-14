@@ -1201,6 +1201,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
             socket.on('disconnect', (reason) => {
+                console.warn(`%c[OdaIci Client] SOCKET DISCONNECT alındı! Səbəb (reason): ${reason}`, "color: orange; font-weight: bold;", "Full reason object:", reason);
                 console.warn(`%c[OdaIci Client v4-logs | Socket Event] >>> disconnect: Serverlə bağlantı kəsildi! Səbəb: ${reason}`, "color: orange;");
                 if (gameStatusDisplay) gameStatusDisplay.textContent = 'Serverlə bağlantı kəsildi!';
                 if (turnIndicator) turnIndicator.textContent = "Offline";

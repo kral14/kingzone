@@ -9,7 +9,7 @@ primary_region = 'waw'
 
 # ----- BAŞLATMA ƏMRİNİ DƏQİQ GÖSTƏRİRİK -----
 [processes]
-  app = "node server/server_multi.js" # Fayl server qovluğunda olduğu üçün
+  app = "node server/server.js" # <--- DƏYİŞDİRİLDİ
 # -----------------------------------------
 
 # [[services]] istifadə edirik [http_service] əvəzinə

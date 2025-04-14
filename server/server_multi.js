@@ -161,6 +161,8 @@ console.log('--- Part 1/7 Tamamlandı ---');
  */
 function broadcastRoomList() {
     try {
+        // <<< YENİ LOGLAR >>>
+        console.log(`[DEBUG broadcastRoomList] Funksiya çağırıldı. Mövcud otaqlar: ${Object.keys(rooms).length}`);
         const roomListForClients = Object.values(rooms).map(room => {
             const p1 = room.gameState?.player1;
             const p2 = room.gameState?.player2;
@@ -169,7 +171,9 @@ function broadcastRoomList() {
             if (p2?.socketId && !p2.isDisconnected) activePlayerCount++;
             // Əgər gameState yoxdursa (çox nadir hal), room.players-dən götür
             const displayPlayerCount = room.gameState ? activePlayerCount : room.players.length;
-
+            // Hər otaq üçün detallı log
+            console.log(`[DEBUG broadcastRoomList] Room <span class="math-inline">\{room\.id\} \(</span>{room.name}): players array=[<span class="math-inline">\{room\.players\.join\(', '\)\}\], p1\=</span>{p1?.username}(<span class="math-inline">\{p1?\.socketId ? \(p1\.isDisconnected ? 'DC'\:'ON'\)\:'null'\}\), p2\=</span>{p2?.username}(<span class="math-inline">\{p2?\.socketId ? \(p2\.isDisconnected ? 'DC'\:'ON'\)\:'null'\}\), calculated count\=</span>{displayPlayerCount}`);
+            // <<< YENİ LOGLAR SONU >>>
             return {
                 id: room.id,
                 name: room.name,
@@ -1415,6 +1419,7 @@ console.log('--- Part 6/7 Tamamlandı (io.on("connection") bloku hələ də aç�
             if (gameStateNeedsUpdate && room.gameState && room.players.length > 0) {
                  emitGameStateUpdate(roomId, 'player_explicit_leave'); // Qalanlara state göndər
             }
+            console.log(`[DEBUG leave_room] Broadcasting room list after explicit leave from room ${roomId}.`); // <<< YENİ LOG >>>
             broadcastRoomList(); // Sonra lobbini yenilə
             // ---- Broadcast və Emit Sonu ----
         } else {
@@ -1499,6 +1504,7 @@ function handleDisconnectOrLeave(socketInstance, reason = 'disconnect') {
     }
     // Lobbini həmişə yenilə (əgər players[] dəyişibsə və ya state dəyişibsə)
     if (playerRemovedFromArray || gameStateChanged) {
+        console.log(`[DEBUG handleDisconnectOrLeave] Broadcasting room list after disconnect. Room: ${roomId}, Reason: ${reason}`); // <<< YENİ LOG >>>
         broadcastRoomList();
     }
 }

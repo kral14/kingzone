@@ -172,7 +172,7 @@ function broadcastRoomList() {
             // Əgər gameState yoxdursa (çox nadir hal), room.players-dən götür
             const displayPlayerCount = room.gameState ? activePlayerCount : room.players.length;
             // Hər otaq üçün detallı log
-            console.log(`[DEBUG broadcastRoomList] Room <span class="math-inline">\{room\.id\} \(</span>{room.name}): players array=[<span class="math-inline">\{room\.players\.join\(', '\)\}\], p1\=</span>{p1?.username}(<span class="math-inline">\{p1?\.socketId ? \(p1\.isDisconnected ? 'DC'\:'ON'\)\:'null'\}\), p2\=</span>{p2?.username}(<span class="math-inline">\{p2?\.socketId ? \(p2\.isDisconnected ? 'DC'\:'ON'\)\:'null'\}\), calculated count\=</span>{displayPlayerCount}`);
+            console.log(`[DEBUG broadcastRoomList] Room ${room.id} ('${room.name}'): players array=[${room.players?.join(', ') || ''}], p1=${p1?.username || 'N/A'}(${p1?.socketId ? (p1.isDisconnected ? 'DC':'ON'):'null'}), p2=${p2?.username || 'N/A'}(${p2?.socketId ? (p2.isDisconnected ? 'DC':'ON'):'null'}), calculated count=${displayPlayerCount}`);
             // <<< YENİ LOGLAR SONU >>>
             return {
                 id: room.id,

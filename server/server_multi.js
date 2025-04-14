@@ -32,12 +32,12 @@ const server = http.createServer(app);
 console.log('[Setup 1.1] HTTP server yaradıldı.');
 const io = new Server(server, {
     cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:8080", // Client URL mühit dəyişənindən və ya default
+        origin: process.env.CLIENT_URL || "http://localhost:8080", // Bunu da yoxlayaq - sekretlə eyni olmalıdır
         methods: ["GET", "POST"],
-        credentials: true // Sessiya cookie-lərinin göndərilməsi üçün vacibdir
+        credentials: true
     },
-    pingInterval: 10000, // 10 saniyədən bir ping
-    pingTimeout: 5000,   // 5 saniyə cavab gözləmə
+    pingInterval: 10000, // Ping intervalı qalsın
+    pingTimeout: 15000  // Timeout-u 15 saniyəyə qaldırdıq
 });
 console.log(`[Setup 1.1] Socket.IO serveri yaradıldı. CORS Origin: ${process.env.CLIENT_URL || "http://localhost:8080"}`);
 

@@ -5,20 +5,24 @@ FROM node:18-slim
 WORKDIR /app
 
 # Əvvəlcə package fayllarını kopyala və dependency-ləri quraşdır
-COPY package*.json ./
-RUN npm install --omit=dev --production
+# package-lock.json varsa və güncəldirsə npm ci daha sürətli və etibarlıdır
+COPY package-lock.json* package.json ./
+RUN npm ci --omit=dev --production
+# Əgər package-lock yoxdursa və ya köhnəlibsə npm install istifadə edin
+# COPY package*.json ./
+# RUN npm install --omit=dev --production
 
 # Bütün proyekt kodunu kopyala
-# server_multi.js və public qovluğunun 'server' adlı alt qovluqda olduğunu fərz edirik
 COPY . .
-# ----- YENİ DİAQNOSTİKA ƏMRLƏRİ -----
-    RUN ls -la /app
-    RUN ls -la /app/server || echo "Server directory /app/server not found during build"
-    # ----- YENİ DİAQNOSTİKA ƏMRLƏRİ SONU -----
-    
-# Tətbiqin işləyəcəyi portu bildir (server.js-dəki ilə eyni - 8080)
+
+# (İstəyə bağlı) Build zamanı faylların düzgün kopyalandığını yoxlamaq üçün:
+RUN echo "Listing /app contents:" && ls -la /app && \
+    echo "Listing /app/server contents:" && ls -la /app/server && \
+    echo "Listing /app/server/socket contents:" && ls -la /app/server/socket || \
+    echo "Directory listing failed during build"
+
+# Tətbiqin işləyəcəyi portu bildir
 EXPOSE 8080
 
-# Serveri işə salmaq üçün əmr
-# server_multi.js faylının 'server' qovluğunda olduğunu yoxlayın!
-CMD [ "node", "server/server_multi.js" ]
+# Serveri işə salmaq üçün DÜZGÜN əmr
+CMD [ "node", "server/server.js" ]

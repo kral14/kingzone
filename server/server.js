@@ -15,7 +15,7 @@ const sessionMiddleware = require('./config/session');
 const authRoutes = require('./routes/auth.routes.js');
 
 // Socket.IO başladıcı funksiyasını import et
-const initializeSocketIO = require('./socket');
+const initializeSocketIO = require('./socket/index.js'); // <<<--- DƏYİŞİKLİK BURADA
 
 // --- Express Tətbiqini Yarat ---
 const app = express();

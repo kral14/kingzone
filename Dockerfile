@@ -15,11 +15,19 @@ RUN npm ci --omit=dev --production
 # Bütün proyekt kodunu kopyala
 COPY . .
 
-# (İstəyə bağlı) Build zamanı faylların düzgün kopyalandığını yoxlamaq üçün:
-RUN echo "Listing /app contents:" && ls -la /app && \
-    echo "Listing /app/server contents:" && ls -la /app/server && \
-    echo "Listing /app/server/socket contents:" && ls -la /app/server/socket || \
-    echo "Directory listing failed during build"
+# ---- Build Zamanı Faylları Yoxlamaq Üçün Diaqnostika ----
+# Əgər bu yollardan biri tapılmazsa, RUN əmri xəta verəcək və build dayanacaq.
+RUN echo "Checking crucial files/dirs after COPY:" && \
+    echo "--> Checking /app/server directory:" && \
+    ls -ld /app/server && \
+    echo "--> Checking /app/server/socket directory:" && \
+    ls -ld /app/server/socket && \
+    echo "--> Checking /app/server/socket/index.js file:" && \
+    ls -l /app/server/socket/index.js && \
+    echo "--> Checking /app/server/server.js file:" && \
+    ls -l /app/server/server.js && \
+    echo "--> File/Directory Checks Passed."
+# --------------------------------------------------------
 
 # Tətbiqin işləyəcəyi portu bildir
 EXPOSE 8080

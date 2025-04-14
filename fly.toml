@@ -1,45 +1,47 @@
-# fly.toml app configuration file for server-delicate-mountain-4709
-# See https://fly.io/docs/reference/configuration/
+# fly.toml app configuration file generated for kingzone on 2025-04-15T00:00:00+04:00
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = 'server-delicate-mountain-4709'
-primary_region = 'waw'
+app = 'kingzone' # <<<--- Tətbiq adınızın düzgün olduğundan əmin olun
+primary_region = 'waw' # <<<--- Sizin regionunuz
 
-# Build ayarları dəyişməz qaldı
 [build]
+  # Dockerfile istifadə olunursa, buranı boş saxlaya və ya Dockerfile ayarlarını əlavə edə bilərsiniz
+  # Əgər @flydotio/dockerfile istifadə edirsinizsə, bura aid ayarlar ola bilər
 
-# ----- BAŞLATMA ƏMRİNİ DƏQİQ GÖSTƏRİRİK -----
+# Əsas prosesi təyin edirik - server.js işə düşməlidir
 [processes]
-  app = "node server/server.js" # <--- DƏYİŞDİRİLDİ
-# -----------------------------------------
+  app = "node server/server.js"
 
-# [[services]] istifadə edirik [http_service] əvəzinə
+# Servislər və portlar
 [[services]]
-  internal_port = 8080 # Tətbiqinin dinlədiyi port
-  processes = ['app']  # Hansı prosesin bu servisi təmin etdiyi
-  protocol = 'tcp'     # Port üçün protokol
-  auto_stop_machines = 'stop' # Hələ də maşınları dayandıra bilər
-  auto_start_machines = true  # Hələ də maşınları başlada bilər
-  min_machines_running = 0    # Hələ də 0-a qədər azalda bilər
+  internal_port = 8080 # Node.js tətbiqinizin dinlədiyi port (PORT mühit dəyişəni və ya default 8080)
+  processes = ["app"] # Yuxarıdakı 'app' prosesini istifadə edir
+  protocol = "tcp"
+  auto_stop_machines = true # İstifadədə olmadıqda maşınları dayandır
+  auto_start_machines = true # Sorğu gəldikdə maşınları başlat
+  min_machines_running = 0 # Aktiv maşın sayını 0-a endirə bilər
 
-  # Kənara açılan portlar (HTTP və HTTPS)
+  # HTTP portu (80)
   [[services.ports]]
-    handlers = ['http']
+    handlers = ["http"]
     port = 80
-    force_https = true # HTTP-ni HTTPS-ə yönləndir
+    force_https = true # Avtomatik HTTPS-ə yönləndir
 
+  # HTTPS portu (443)
   [[services.ports]]
-    handlers = ['tls', 'http'] # TLS (HTTPS) və HTTP handlerları
+    handlers = ["tls", "http"] # TLS (SSL) və HTTP trafikini qəbul edir
     port = 443
 
-  # SAĞLAMLIQ YOXLAMASI - ƏLAVƏ EDİLDİ
+  # Sağlamlıq yoxlaması (TCP Check - daha sadə)
+  # Fly.io tətbiqin işlək olub olmadığını yoxlamaq üçün internal_port-a qoşulmağa çalışacaq
   [[services.tcp_checks]]
-    interval = '15s'      # Yoxlamalar arası interval
-    timeout = '2s'        # Qoşulma üçün gözləmə müddəti
-    grace_period = '5s'   # Tətbiq başladıqdan sonra ilk yoxlamadan əvvəl gözləmə müddəti (VACİB!)
-    restart_limit = 0     # Yoxlama uğursuz olsa maşını restart etmə (Fly özü idarə edəcək)
-# ---------------------------------------
+    interval = "15s"      # Yoxlamalar arası 15 saniyə
+    timeout = "2s"        # Qoşulma üçün 2 saniyə vaxt
+    grace_period = "10s"  # Tətbiq başladıqdan sonra ilk yoxlamadan əvvəl 10 saniyə gözləmə (bu vacibdir!)
+    # restart_limit = 0   # Yoxlama uğursuz olsa Fly.io özü idarə edir
 
-# VM ayarları dəyişməz qaldı
+# Virtual Maşın ölçüsü (əvvəlki kimi)
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'

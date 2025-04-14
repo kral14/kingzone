@@ -2,21 +2,23 @@
   "name": "server",
   "version": "1.0.0",
   "main": "index.js",
-"scripts": {
-  "start": "node server/server_multi.js",
-  "test": "echo \"Error: no test specified\" && exit 1"
-},
+  "scripts": {
+    "start": "node server/server_multi.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "bcrypt": "^5.1.1",
     "connect-pg-simple": "^10.0.0",
     "dotenv": "^16.4.7",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
     "pg": "^8.14.1",
+    "redis": "^4.7.0",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {

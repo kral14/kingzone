@@ -1470,7 +1470,7 @@ function handleDisconnectOrLeave(socketInstance, reason = 'disconnect') {
 
     if (!roomId || !rooms[roomId]) {
         console.log(`[handleDisconnectOrLeave v9] User ${username} was not in a valid room.`);
-        broadcastRoomList(); // Otaqda olmasa da user sayı dəyişə bilər, lobbini yenilə
+       // broadcastRoomList(); // Otaqda olmasa da user sayı dəyişə bilər, lobbini yenilə
         return;
     }
     const room = rooms[roomId];

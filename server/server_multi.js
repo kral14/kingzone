@@ -1,889 +1,1793 @@
-// server/server_multi.js
+// server_multi.js (Yekun Düzəlişli Versiya - Bölünmüş)
+// ==============================================================
+// ===== Part 1/7: Setup, Middleware, Helpers, Globals ======
+// ==============================================================
 
-// Əsas modulları import edirik
-import express from 'express';
-import http from 'http';
-import { Server } from 'socket.io';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import pg from 'pg';
-import session from 'express-session';
-import connectPgSimple from 'connect-pg-simple';
-import bcrypt from 'bcrypt';
-import dotenv from 'dotenv';
+// ---- Əsas Modulların Import Edilməsi ----
+require('dotenv').config(); // Mühit dəyişənlərini .env faylından oxumaq üçün
+const express = require('express');
+const http = require('http');
+const { Server } = require("socket.io"); // socket.io v4+ sintaksisi
+const path = require('path');
+const bcrypt = require('bcrypt');
+const { Pool } = require('pg'); // PostgreSQL üçün
+const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session); // Sessiyaları DB-də saxlamaq üçün
+const crypto = require('crypto'); // Unikal ID-lər yaratmaq üçün
 
-// Redis üçün lazımi modulları import edirik
-import { createClient } from 'redis'; // Redis klienti
-import { createAdapter } from '@socket.io/redis-adapter'; // Redis adapteri
+// ---- Sabitlər ----
+const saltRounds = 10; // Bcrypt üçün hash dövrü sayı
+const RECONNECT_TIMEOUT_MS = 30 * 1000; // İstifadəçinin yenidən qoşulması üçün gözləmə müddəti (30 saniyə)
+const ROOM_CLEANUP_DELAY_MS = 5 * 60 * 1000; // Boş otağın silinməsi üçün gözləmə müddəti (5 dəqiqə)
 
-// .env faylındakı dəyişənləri yükləyirik
-dotenv.config();
+console.log("==============================================================");
+console.log("--- Multiplayer Server (Yekun v1 - Bölünmüş) Başladılır ---"); // Versiya adı dəyişdirildi
+console.log(`--- Reconnect Timeout: ${RECONNECT_TIMEOUT_MS / 1000}s, Room Cleanup Delay: ${ROOM_CLEANUP_DELAY_MS / 60000}min ---`);
+console.log("==============================================================");
 
-// Fayl və qovluq yollarını təyin edirik
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Şifrələmə üçün salt raundlarının sayını təyin edirik
-const saltRounds = 10;
-
-// --- Redis Setup ---
-// Fly.io tərəfindən təmin edilən REDIS_URL mühit dəyişənini və ya lokal test üçün default URL'i istifadə et
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-console.log(`Connecting to Redis at: ${redisUrl}`);
-
-// Publish/Subscribe üçün iki ayrı Redis klienti yaradırıq
-const pubClient = createClient({ url: redisUrl });
-const subClient = pubClient.duplicate(); // Mövcud bağlantını klonlayırıq
-
-// Qoşulma zamanı baş verə biləcək xətaları loglamaq üçün listener əlavə edirik
-pubClient.on('error', (err) => console.error('Redis Pub Client Error:', err));
-subClient.on('error', (err) => console.error('Redis Sub Client Error:', err));
-// --- END Redis Setup ---
-// Express tətbiqini, HTTP serverini və Socket.IO serverini yaradırıq
+// ---- Express və Socket.IO Tətbiqlərinin Yaradılması ----
 const app = express();
+console.log('[Setup 1.1] Express tətbiqi yaradıldı.');
 const server = http.createServer(app);
-const io = new Server(server);
-
-// --- Verilənlər bazası və Sessiya Ayarları ---
-const PgStore = connectPgSimple(session); // PostgreSQL sessiya anbarını əldə edirik
-const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL, // Verilənlər bazası URL'i .env faylından
-  // Production mühitində SSL tələb oluna bilər:
-  // ssl: { rejectUnauthorized: false } // Hostinq tələb edirsə aktivləşdirin
+console.log('[Setup 1.1] HTTP server yaradıldı.');
+const io = new Server(server, {
+    cors: {
+        origin: process.env.CLIENT_URL || "http://localhost:8080", // Bunu da yoxlayaq - sekretlə eyni olmalıdır
+        methods: ["GET", "POST"],
+        credentials: true
+    },
+    pingInterval: 10000, // Ping intervalı qalsın
+    pingTimeout: 15000  // Timeout-u 15 saniyəyə qaldırdıq
 });
+console.log(`[Setup 1.1] Socket.IO serveri yaradıldı. CORS Origin: ${process.env.CLIENT_URL || "http://localhost:8080"}`);
 
-// Verilənlər bazasına qoşulmağa çalışırıq və nəticəni loglayırıq
-pool.connect()
-  .then(() => console.log('✅ PostgreSQL veritabanına başarıyla bağlandı.'))
-  .catch(err => console.error('❌ Veritabanı bağlantı hatası:', err.stack));
+// ---- PostgreSQL Verilənlər Bazası Bağlantı Pool-u ----
+if (!process.env.DATABASE_URL) {
+    console.error('[FATAL ERROR 1.1] DATABASE_URL mühit dəyişəni tapılmadı! Server dayandırılır.');
+    process.exit(1);
+}
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL
+    // ssl: config obyekti artıq burada yoxdur
+});
+console.log('[Setup 1.1] PostgreSQL connection pool yaradıldı.');
 
-// Sessiya middleware'ini konfiqurasiya edirik
+// DB Bağlantı Testi Funksiyası
+async function testDBConnection() {
+    let client;
+    try {
+        client = await pool.connect();
+        const result = await client.query('SELECT NOW()');
+        console.log(`---- [DB Check 1.1] Verilənlər bazasına uğurla qoşuldu: ${new Date(result.rows[0].now).toISOString()} ----`);
+    } catch (err) {
+        console.error('[FATAL ERROR 1.1] Verilənlər bazasına qoşulma xətası! Server dayandırılır.', err.stack);
+        process.exit(1);
+    } finally {
+        if (client) client.release();
+    }
+}
+testDBConnection(); // Başlamazdan əvvəl yoxla
+
+// ---- Express Ayarları ----
+if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1); // Proxy arxasında işləmək üçün
+    console.log('[Setup 1.2] Express "trust proxy" ayarı aktiv edildi (production).');
+}
+
+// ---- Session Middleware Konfiqurasiyası ----
+if (!process.env.SESSION_SECRET) {
+    console.error('[FATAL ERROR 1.2] SESSION_SECRET mühit dəyişəni tapılmadı! Server dayandırılır.');
+    process.exit(1);
+}
 const sessionMiddleware = session({
-  store: new PgStore({
-    pool: pool,                // Sessiyaları saxlamaq üçün istifadə ediləcək pool
-    tableName: 'user_sessions' // Verilənlər bazasındakı sessiya cədvəlinin adı
-  }),
-  secret: process.env.SESSION_SECRET || 'bu_cox_gizli_bir_acardir_deyisdirin_!', // ÇOX VACİB: Güclü və gizli bir açar istifadə edin, .env faylında saxlayın
-  resave: false, // Eyni sessiyanın dəyişiklik olmadan yenidən saxlanmasının qarşısını alır
-  saveUninitialized: false, // Boş (yeni amma dəyişdirilməmiş) sessiyaların saxlanmasının qarşısını alır
-  cookie: {
-    secure: process.env.NODE_ENV === 'production', // Yalnız HTTPS üzərindən göndərilsin (productionda 'true' olmalıdır)
-    maxAge: 30 * 24 * 60 * 60 * 1000, // Cookie ömrü: 30 gün (millisaniyə cinsindən)
-    httpOnly: true, // Cookie'nin JavaScript tərəfindən oxunmasının qarşısını alır (XSS qoruması)
-    // sameSite: 'lax' // CSRF hücumlarına qarşı kömək edir ('lax' və ya 'strict' ola bilər)
-  },
+    store: new pgSession({
+        pool: pool,                // PostgreSQL pool
+        tableName: 'user_sessions', // DB-dəki cədvəl adı
+        pruneSessionInterval: 60 * 15 // 15 dəqiqədən bir köhnə sessiyaları təmizlə (saniyə)
+    }),
+    secret: process.env.SESSION_SECRET,
+    resave: false,             // Dəyişiklik olmadıqda sessiyanı yenidən saxlamasın
+    saveUninitialized: false, // Boş sessiyaları saxlamasın
+    cookie: {
+        secure: process.env.NODE_ENV === 'production', // Yalnız HTTPS (productionda)
+        httpOnly: true,           // Client JS cookie-yə çata bilməsin
+        maxAge: 1000 * 60 * 60 * 24 * 7, // 7 gün (ms)
+        sameSite: 'lax'          // CSRF üçün qismən qoruma
+    }
 });
-// --- END Verilənlər bazası və Sessiya Ayarları ---
-// --- Express Middleware Ayarları ---
-// Təyin etdiyimiz sessiya middleware'ini Express tətbiqinə əlavə edirik
 app.use(sessionMiddleware);
+console.log('[Setup 1.2] Session middleware (pgSession ilə) konfiqurasiya edildi.');
 
-// Gələn JSON formatlı sorğuları emal etmək üçün middleware
-app.use(express.json());
+// ---- Digər Middleware-lər ----
+app.use(express.json()); // Gələn JSON body-lərini parse et
+console.log('[Setup 1.2] Express JSON parser middleware tətbiq edildi.');
 
-// Gələn URL-encoded formatlı sorğuları (form dataları) emal etmək üçün middleware
-app.use(express.urlencoded({ extended: true }));
+// Sorğu Loglama Middleware
+app.use((req, res, next) => {
+    // Socket.IO upgrade sorğularını və statik faylları (html xaric) loglamayaq
+    if (req.headers.upgrade === 'websocket' || (req.url.includes('.') && !req.url.endsWith('.html'))) {
+        return next();
+    }
+    const userNickname = req.session?.user?.nickname || 'Anonymous';
+    const timestamp = new Date().toLocaleTimeString('az-AZ');
+    console.log(`[Request Log ${timestamp}] ${req.method} ${req.originalUrl} (User: ${userNickname})`);
+    next();
+});
+console.log('[Setup 1.2] Sorğu loglama middleware tətbiq edildi.');
 
-// 'public' qovluğundakı statik faylları (HTML, CSS, JS, şəkillər) təqdim etmək üçün middleware
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// Statik Fayl Middleware
+const publicDirectoryPath = path.join(__dirname, '../public');
+app.use(express.static(publicDirectoryPath));
+console.log('[Setup 1.2] Static files middleware tətbiq edildi. Statik qovluq:', publicDirectoryPath);
 
-// Socket.IO'nun da Express sessiyalarına girişini təmin etmək üçün eyni middleware'i ona da veririk
-// Bu, Socket.IO handler'ları içində `socket.request.session` vasitəsilə sessiya məlumatlarına çatmağa imkan verəcək
-io.engine.use(sessionMiddleware);
-// --- END Express Middleware Ayarları ---
-// --- Helper Functions (Redis ilə işləmək üçün) ---
+// Autentifikasiya Middleware Funksiyası (API endpointləri üçün)
+const isAuthenticated = (req, res, next) => {
+    if (req.session?.user?.id) {
+        return next(); // İstifadəçi giriş edib
+    }
+    console.warn(`[Auth Check 1.2] HTTP FAILED - Giriş tələb olunur. Path: ${req.originalUrl}`);
+    // Client tərəf auth yoxlamasına güvənirik, burada yalnız JSON cavabı qaytaraq
+    return res.status(401).json({ loggedIn: false, message: 'Bu əməliyyat üçün giriş tələb olunur.' });
+};
+console.log('[Setup 1.2] isAuthenticated middleware funksiyası təyin edildi.');
+
+// ----- Qlobal Dəyişənlər -----
+let rooms = {}; // Aktiv oyun otaqları (Key: roomId, Value: Room Object)
+let users = {}; // Qoşulu istifadəçilər (Key: socket.id, Value: { id, userId, username, currentRoom, disconnectTimer })
+let roomCleanupTimers = {}; // Boş otaqları silmək üçün taymerlər (Key: roomId, Value: TimeoutID)
+
+console.log('[State 1.3] Qlobal `rooms`, `users` və `roomCleanupTimers` obyektləri yaradıldı.');
+
+// ----- Sadə Yardımçı Funksiya -----
+function generateRoomId() {
+    return crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 rəqəmli HEX ID
+}
+
+console.log('--- Part 1/7 Tamamlandı ---');
+// ==============================
+// ===== PART 1/7 SONU ==========
+// ==============================
+
+// Növbəti hissə (Part 2/7) burada başlayacaq...
+// ===================================================================
+// ===== Part 2/7: Utility Functions & Core Game State Logic =====
+// ===================================================================
+
+// ----- Otaq Siyahısı Yayımı Funksiyası (v9 - Active Player Count) -----
+/**
+ * Hazırkı aktiv multiplayer otaqlarının siyahısını formatlayıb
+ * bütün qoşulu olan clientlərə (lobby-dəkilərə) göndərir.
+ * Oyunçu sayını gameState-dəki aktiv oyunçulara görə hesablayır.
+ */
+function broadcastRoomList() {
+    try {
+        // <<< YENİ LOGLAR >>>
+        console.log(`[DEBUG broadcastRoomList] Funksiya çağırıldı. Mövcud otaqlar: ${Object.keys(rooms).length}`);
+        const roomListForClients = Object.values(rooms).map(room => {
+            const p1 = room.gameState?.player1;
+            const p2 = room.gameState?.player2;
+            let activePlayerCount = 0;
+            if (p1?.socketId && !p1.isDisconnected) activePlayerCount++;
+            if (p2?.socketId && !p2.isDisconnected) activePlayerCount++;
+            // Əgər gameState yoxdursa (çox nadir hal), room.players-dən götür
+            const displayPlayerCount = room.gameState ? activePlayerCount : room.players.length;
+            // Hər otaq üçün detallı log
+            console.log(`[DEBUG broadcastRoomList] Room ${room.id} ('${room.name}'): players array=[${room.players?.join(', ') || ''}], p1=${p1?.username || 'N/A'}(${p1?.socketId ? (p1.isDisconnected ? 'DC':'ON'):'null'}), p2=${p2?.username || 'N/A'}(${p2?.socketId ? (p2.isDisconnected ? 'DC':'ON'):'null'}), calculated count=${displayPlayerCount}`);
+            // <<< YENİ LOGLAR SONU >>>
+            return {
+                id: room.id,
+                name: room.name,
+                playerCount: displayPlayerCount, // Hesablanmış aktiv say
+                hasPassword: !!room.password,
+                boardSize: room.boardSize,
+                creatorUsername: room.creatorUsername,
+                // Yalnız aktiv oyunçuların adını göstər
+                player1Username: (p1?.socketId && !p1.isDisconnected) ? p1.username : null,
+                player2Username: (p2?.socketId && !p2.isDisconnected) ? p2.username : null,
+                isAiRoom: false
+            };
+        });
+        io.emit('room_list_update', roomListForClients);
+        // console.log(`[Broadcast 2.1] Multiplayer otaq siyahısı yeniləndi (${roomListForClients.length} otaq).`);
+    } catch (error) {
+        console.error("[Broadcast 2.1] Otaq siyahısı göndərilərkən XƏTA:", error);
+        io.emit('room_list_update', []); // Xəta olsa boş siyahı göndər
+    }
+}
+
+// ----- Əsas Oyun Məntiqi Funksiyaları -----
 
 /**
- * Redis-dəki bütün aktiv otaqların məlumatlarını alır.
- * 'activeRooms' Set-indəki hər bir otaq açarına (key) görə
- * 'room:{roomId}' Hash-ından detalları çəkir.
- * @param {object} redisClient - Qoşulmuş Redis klienti (pubClient və ya subClient).
- * @returns {Promise<Array<object>>} - Otaq obyektlərindən ibarət bir massiv (vəd).
+ * Verilmiş otaq üçün yeni oyun vəziyyəti (gameState) yaradır və ya sıfırlayır.
+ * Həmişə 'waiting' fazası ilə başlayır və restart məlumatlarını sıfırlayır.
+ * @param {object} room - Oyun vəziyyəti yaradılacaq otaq obyekti.
+ * @returns {object | null} - Yaradılmış gameState obyekti və ya xəta halında null.
  */
-async function getAllRooms(redisClient) {
-    try {
-      // 'activeRooms' Set-indəki bütün otaq açarlarını (məsələn, 'room:123', 'room:456') alırıq
-      const roomKeys = await redisClient.sMembers('activeRooms');
-      const rooms = []; // Nəticə massivi
-  
-      // Hər bir otaq açarı üçün detalları alırıq
-      for (const roomKey of roomKeys) {
-        // Otaq açarına uyğun Hash-dan bütün sahələri (id, name, playerCount, vs.) alırıq
-        const roomData = await redisClient.hGetAll(roomKey);
-  
-        // Əgər məlumatlar tamdırsa (ən azı 'id' varsa) nəticəyə əlavə edirik
-        if (roomData && roomData.id) {
-          rooms.push({
-            id: roomData.id,
-            name: roomData.name || `Otaq ${roomData.id.substring(0, 5)}`, // Ad yoxdursa default ad
-            playerCount: parseInt(roomData.playerCount || '0', 10), // Rəqəmə çeviririk
-            maxPlayers: parseInt(roomData.maxPlayers || '2', 10), // Rəqəmə çeviririk
-            // status: roomData.status || 'waiting' // Lazım gələrsə statusu da əlavə edə bilərsiniz
-          });
-        } else {
-          // Əgər hansısa səbəbdən otaq açarı var, amma detalları yoxdursa,
-          // bu natamam qeydi Redis-dən təmizləyirik ki, problemlər yaranmasın.
-          console.warn(`⚠️ Removing potentially inconsistent room key from activeRooms: ${roomKey}`);
-          await redisClient.sRem('activeRooms', roomKey); // 'activeRooms' Set-indən silirik
-          await redisClient.del(roomKey); // Əlaqəli Hash-ı da silirik (əgər varsa)
-        }
-      }
-      return rooms; // Otaq siyahısını qaytarırıq
-    } catch (error) {
-      console.error("❌ Error getting all rooms from Redis:", error);
-      return []; // Xəta baş verərsə boş massiv qaytarırıq
+function initializeGameState(room) {
+    if (!room || !room.id) {
+        console.error("[Game Logic 2.2 - v10] initializeGameState: Keçərsiz otaq obyekti!", room);
+        return null;
     }
-  }
-  
-  /**
-   * Verilmiş socket ID-sinin hansı otaqda olduğunu Redis-dən alır.
-   * 'socket:{socketId}:room' String-inin dəyərini oxuyur.
-   * @param {object} redisClient - Qoşulmuş Redis klienti.
-   * @param {string} socketId - Socket.IO bağlantısının unikal ID-si.
-   * @returns {Promise<string|null>} - Otağın ID-sini (əgər varsa) və ya null qaytarır (vəd).
-   */
-  async function getRoomIdForSocket(redisClient, socketId) {
-     try {
-       // 'socket:abcxyz123:room' kimi bir açarın dəyərini (otaq ID-si) alırıq
-       return await redisClient.get(`socket:${socketId}:room`);
-     } catch(error) {
-       console.error(`❌ Error getting room ID for socket ${socketId}:`, error);
-       return null; // Xəta olarsa null qaytarırıq
-     }
-  }
-  
-  // --- END Helper Functions (Redis ilə işləmək üçün) --- // (Bu kommenti hələ silməyin)
-  /**
- * Verilmiş otaq ID-sinə uyğun detalları Redis Hash-ından alır.
- * 'room:{roomId}' Hash-ının bütün sahələrini oxuyur.
- * @param {object} redisClient - Qoşulmuş Redis klienti.
- * @param {string} roomId - Otağın ID-si.
- * @returns {Promise<object|null>} - Otağın detallarını (sahələrini) ehtiva edən obyekt və ya null qaytarır (vəd).
- */
-async function getRoomDetails(redisClient, roomId) {
-    try {
-      // 'room:abcxyz123' kimi bir açara sahib Hash-dan bütün sahələri (name, playerCount vs.) alırıq
-      return await redisClient.hGetAll(`room:${roomId}`);
-    } catch(error) {
-      console.error(`❌ Error getting details for room ${roomId}:`, error);
-      return null; // Xəta olarsa null qaytarırıq
-    }
- }
- 
- /**
-  * Verilmiş otaq ID-sindəki oyunçuların (socket ID-lərinin) siyahısını Redis Set-indən alır.
-  * 'room:{roomId}:players' Set-inin bütün üzvlərini oxuyur.
-  * @param {object} redisClient - Qoşulmuş Redis klienti.
-  * @param {string} roomId - Otağın ID-si.
-  * @returns {Promise<Array<string>>} - Socket ID-lərindən ibarət bir massiv qaytarır (vəd).
-  */
- async function getPlayersInRoom(redisClient, roomId) {
-   try {
-     // 'room:abcxyz123:players' kimi bir Set-dən bütün üzvləri (socket ID-lərini) alırıq
-     return await redisClient.sMembers(`room:${roomId}:players`);
-   } catch(error) {
-     console.error(`❌ Error getting players in room ${roomId}:`, error);
-     return []; // Xəta olarsa boş massiv qaytarırıq
-   }
- }
- 
- /**
-  * Ən son otaq siyahısını Redis-dən alır və bütün bağlı olan Socket.IO klientlərinə
-  * 'updateRoomList' hadisəsi ilə göndərir.
-  * @param {object} redisClient - Qoşulmuş Redis klienti.
-  * @returns {Promise<void>} - Asinxron əməliyyat bitdikdə heç nə qaytarmır (vəd).
-  */
- async function broadcastRoomList(redisClient) {
-   try {
-     // Əvvəlki yardımçı funksiya ilə bütün otaqların aktual siyahısını alırıq
-     const rooms = await getAllRooms(redisClient);
-     console.log("📢 Broadcasting updated room list:", JSON.stringify(rooms));
-     // Socket.IO serveri (`io`) vasitəsilə 'updateRoomList' hadisəsini
-     // bütün bağlı klientlərə (lobby-də olanlara) göndəririk
-     io.emit('updateRoomList', rooms);
-   } catch (error) {
-     console.error("❌ Error broadcasting room list:", error);
-   }
- }
- // --- END Helper Functions (Redis ilə işləmək üçün) --- // İndi bu kommenti saxlaya bilərsiniz
- // --- Autentifikasiya Yolları (Endpoints) ---
+    console.log(`[Game Logic 2.2 - v10] Otaq üçün gameState yaradılır/sıfırlanır: ${room.id}`);
 
-// Qeydiyyat üçün POST sorğusu endpoint'i
-app.post('/register', async (req, res) => {
-    // Sorğunun body'sindən istifadəçi adı və şifrəni alırıq
-    const { username, password } = req.body;
-    // Əgər hər ikisi də göndərilməyibsə, xəta qaytarırıq
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: 'İstifadəçi adı və şifrə tələb olunur.' });
-    }
-    try {
-      // Verilənlər bazasında bu istifadəçi adının mövcudluğunu yoxlayırıq
-      const userCheck = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-      if (userCheck.rows.length > 0) {
-        // Əgər mövcuddursa, 409 Conflict statusu ilə xəta qaytarırıq
-        return res.status(409).json({ success: false, message: 'İstifadəçi adı artıq mövcuddur.' });
-      }
-      // Şifrəni hash'ləyirik (bcrypt ilə)
-      const hashedPassword = await bcrypt.hash(password, saltRounds);
-      // Yeni istifadəçini 'users' cədvəlinə əlavə edirik
-      const result = await pool.query(
-        'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username',
-        [username, hashedPassword]
-      );
-      // Əlavə edilmiş istifadəçinin məlumatlarını alırıq
-      const user = result.rows[0];
-      console.log('✅ Yeni istifadəçi qeydiyyatdan keçdi:', user.username);
-  
-      // Qeydiyyatdan dərhal sonra avtomatik giriş etmək üçün sessiya yaradırıq
-      req.session.userId = user.id;       // İstifadəçi ID'sini sessiyada saxlayırıq
-      req.session.username = user.username; // İstifadəçi adını sessiyada saxlayırıq
-  
-      // Uğurlu cavab qaytarırıq (201 Created statusu ilə)
-      res.status(201).json({ success: true, message: 'Qeydiyyat uğurlu oldu.', user: { id: user.id, username: user.username } });
-    } catch (err) {
-      // Əgər hər hansı bir xəta baş verərsə, loglayırıq və 500 Server Error statusu qaytarırıq
-      console.error('❌ Qeydiyyat xətası:', err);
-      res.status(500).json({ success: false, message: 'Server xətası baş verdi.' });
-    }
-  });
-  
-  // Giriş üçün POST sorğusu endpoint'i
-  app.post('/login', async (req, res) => {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: 'İstifadəçi adı və şifrə tələb olunur.' });
-    }
-    try {
-      // İstifadəçi adını verilənlər bazasında axtarırıq
-      const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-      // Əgər istifadəçi tapılmırsa, 401 Unauthorized statusu qaytarırıq
-      if (result.rows.length === 0) {
-        return res.status(401).json({ success: false, message: 'İstifadəçi adı və ya şifrə yanlışdır.' });
-      }
-      // Tapılan istifadəçinin məlumatlarını alırıq
-      const user = result.rows[0];
-      // Göndərilən şifrə ilə bazadakı hash'lənmiş şifrəni müqayisə edirik
-      const match = await bcrypt.compare(password, user.password_hash);
-      // Əgər şifrələr uyğun gəlirsə
-      if (match) {
-        // Sessiya yaradırıq
-        req.session.userId = user.id;
-        req.session.username = user.username;
-        console.log('✅ İstifadəçi giriş etdi:', user.username);
-        // Uğurlu cavab qaytarırıq
-        res.json({ success: true, message: 'Giriş uğurlu oldu.', user: { id: user.id, username: user.username } });
-      } else {
-        // Əgər şifrələr uyğun gəlmirsə, 401 Unauthorized statusu qaytarırıq
-        res.status(401).json({ success: false, message: 'İstifadəçi adı və ya şifrə yanlışdır.' });
-      }
-    } catch (err) {
-      console.error('❌ Giriş xətası:', err);
-      res.status(500).json({ success: false, message: 'Server xətası baş verdi.' });
-    }
-  });
-  
-  // Çıxış üçün POST sorğusu endpoint'i
-  app.post('/logout', (req, res) => {
-    // Mövcud sessiyanı məhv edirik (silirik)
-    req.session.destroy(err => {
-      if (err) {
-        // Əgər sessiyanı silərkən xəta baş verərsə
-        console.error('❌ Sessiya silmə xətası:', err);
-        return res.status(500).json({ success: false, message: 'Çıxış zamanı xəta baş verdi.' });
-      }
-      // Brauzerdən sessiya cookie'sini təmizləyirik ('connect.sid' standart addır)
-      res.clearCookie('connect.sid');
-      console.log('✅ İstifadəçi çıxış etdi.');
-      // Uğurlu cavab qaytarırıq
-      res.json({ success: true, message: 'Uğurla çıxış edildi.' });
+    const boardSize = room.boardSize || 3;
+    // Otaqdakı mövcud oyunçuların socket ID-lərini götürək (əgər varsa)
+    const currentPlayers = room.players || []; // players massivi olmalıdır
+    const player1SocketId = currentPlayers.length > 0 ? currentPlayers[0] : null;
+    const player2SocketId = currentPlayers.length > 1 ? currentPlayers[1] : null;
+
+    // Həmin socket ID-lərinə uyğun user məlumatlarını users[]-dan tapaq
+    const user1Info = player1SocketId ? users[player1SocketId] : null;
+    const user2Info = player2SocketId ? users[player2SocketId] : null;
+
+    const initialPlayerState = (socketInfo) => ({
+        socketId: socketInfo?.id || null,
+        userId: socketInfo?.userId || null,
+        username: socketInfo?.username || null,
+        symbol: null,
+        roll: null,
+        isDisconnected: false, // Başlanğıcda bağlıdır
+        disconnectTime: null
     });
-  });
-  
-  // --- Sessiya Yoxlama Middleware ---
-  /**
-   * Bu middleware funksiyası bir yolun (route) yalnız giriş etmiş (autentifikasiyadan keçmiş)
-   * istifadəçilər tərəfindən əlçatan olmasını təmin edir.
-   */
-  const requireAuth = (req, res, next) => {
-    // Əgər sessiya və ya sessiyada userId yoxdursa, deməli istifadəçi giriş etməyib
-    if (!req.session || !req.session.userId) {
-      console.log("🔒 Autentifikasiya tələb olunur, sessiya tapılmadı və ya userId yoxdur.");
-      // Əgər sorğu AJAX (XMLHttpRequest) və ya API sorğusudursa (JSON qəbul edirsə)
-      if (req.xhr || req.headers.accept.indexOf('json') > -1) {
-         // 401 Unauthorized statusu ilə JSON cavabı qaytarırıq
-         return res.status(401).json({ success: false, message: "Giriş tələb olunur." });
-      } else {
-         // Əgər adi brauzer sorğusudursa (səhifəyə keçid),
-         // istifadəçini giriş səhifəsinə yönləndiririk
-         // DİQQƏT: Yönləndirmə ünvanının düzgün olduğundan əmin olun
-         return res.redirect('/ana_sehife/login/login.html');
-      }
+
+    const newGameState = {
+        board: Array(boardSize * boardSize).fill(''),
+        boardSize: boardSize,
+        gamePhase: 'waiting', // Həmişə 'waiting' ilə başla
+        currentPlayerSymbol: null,
+        player1: initialPlayerState(user1Info),
+        player2: initialPlayerState(user2Info),
+        diceWinnerSocketId: null,
+        symbolPickerSocketId: null,
+        isGameOver: false,
+        winnerSymbol: null,
+        winningCombination: [],
+        statusMessage: "İkinci oyunçu gözlənilir...", // İlkin status
+        lastMoveTime: null,
+        restartRequestedBy: null,      // Restartı sıfırla
+        restartAcceptedBy: new Set() // Restartı sıfırla
+    };
+
+    // Username null qalıbsa və info varsa, yenidən təyin et
+    if (newGameState.player1.socketId && !newGameState.player1.username && user1Info) {
+         newGameState.player1.username = user1Info.username;
     }
-    // Əgər sessiya və userId varsa, sorğunun davam etməsinə icazə veririk (növbəti middleware və ya route handler çağırılır)
-    next();
-  };
-  // --- END Autentifikasiya Yolları ---
-  // --- Statik Fayl Yolları və Qoruma ---
-
-// Oyunlar səhifəsi üçün GET sorğusu endpoint'i
-// Yalnız giriş etmiş istifadəçilər bu səhifəyə daxil ola bilər (requireAuth middleware'i sayəsində)
-app.get('/OYUNLAR/oyunlar/oyunlar.html', requireAuth, (req, res) => {
-    // Əgər istifadəçi giriş edibsə (requireAuth icazə veribsə), oyunlar HTML faylını göndəririk
-    res.sendFile(path.join(__dirname, '..', 'public', 'OYUNLAR', 'oyunlar', 'oyunlar.html'));
-  });
-  
-  // Lobi səhifəsi üçün GET sorğusu endpoint'i
-  // Yalnız giriş etmiş istifadəçilər bu səhifəyə daxil ola bilər
-  app.get('/OYUNLAR/tictactoe/lobby/test_odalar.html', requireAuth, (req, res) => {
-    // Əgər istifadəçi giriş edibsə, lobbi HTML faylını göndəririk
-    res.sendFile(path.join(__dirname, '..', 'public', 'OYUNLAR', 'tictactoe', 'lobby', 'test_odalar.html'));
-  });
-  
-  // Oyun otağı səhifəsi üçün GET sorğusu endpoint'i
-  // Yalnız giriş etmiş istifadəçilər bu səhifəyə daxil ola bilər
-  app.get('/OYUNLAR/tictactoe/game/oda_ici.html', requireAuth, (req, res) => {
-    // Əgər istifadəçi giriş edibsə, oyun otağı HTML faylını göndəririk
-    // QEYD: Əlavə olaraq, bura daxil olmaq üçün istifadəçinin həqiqətən bir otaqda olub olmadığını
-    // yoxlamaq üçün daha mürəkkəb məntiq əlavə etmək olar (məsələn, query parameter və ya sessiya vasitəsilə).
-    res.sendFile(path.join(__dirname, '..', 'public', 'OYUNLAR', 'tictactoe', 'game', 'oda_ici.html'));
-  });
-  
-  // Kök URL ('/') üçün GET sorğusu endpoint'i
-  app.get('/', (req, res) => {
-    // Əgər istifadəçi artıq giriş edibsə (sessiyası varsa)
-    if (req.session && req.session.userId) {
-      // Onu birbaşa oyunlar səhifəsinə yönləndiririk
-      res.redirect('/OYUNLAR/oyunlar/oyunlar.html');
-    } else {
-      // Əgər giriş etməyibsə, onu giriş səhifəsinə yönləndiririk
-      res.redirect('/ana_sehife/login/login.html');
+     if (newGameState.player2.socketId && !newGameState.player2.username && user2Info) {
+         newGameState.player2.username = user2Info.username;
     }
-  });
-  // --- END Statik Fayl Yolları ---
-  // --- Socket.IO Məntiqi (Redis ilə) ---
 
-// Yeni bir klient Socket.IO serverinə qoşulduqda bu funksiya işə düşür
-io.on('connection', async (socket) => {
+    // Köhnə gameState-i yenisi ilə əvəz et
+    room.gameState = newGameState;
+    console.log(`[Game Logic 2.2 - v10] GameState yaradıldı/sıfırlandı. Phase: "${newGameState.gamePhase}"`);
+    return newGameState;
+}
 
-    // Qoşulan soketin sorğusundan (request) sessiya məlumatlarını əldə edirik
-    // Bu, əvvəl `io.engine.use(sessionMiddleware)` etdiyimiz üçün mümkündür
-    const session = socket.request.session;
-  
-    // Sessiyadan istifadəçi adını və ID'sini alırıq. Əgər yoxdursa, müvəqqəti ad/ID veririk.
-    const username = session?.username || `Qonaq_${socket.id.substring(0, 5)}`;
-    const userId = session?.userId; // Giriş etməyibsə bu 'undefined' olacaq
-  
-    // Konsola kimin qoşulduğunu yazırıq
-    console.log(`✔️ ${username} (ID: ${userId || 'N/A'}, Socket: ${socket.id}) qoşuldu.`);
-  
-    // Qoşulan klientə öz istifadəçi məlumatlarını göndəririk (əgər lazımdırsa)
-    socket.emit('userInfo', { username, userId });
-  
-    // Qoşulan kimi həmin klientə mövcud otaqların siyahısını göndəririk
-    try {
-        // Redis-dən aktual otaq siyahısını alırıq (pubClient istifadə edirik, amma fərq etməz)
-        const currentRooms = await getAllRooms(pubClient);
-        // Yalnız bu yeni qoşulan soketə ('socket') siyahını göndəririk
-        socket.emit('updateRoomList', currentRooms);
-        console.log(`📊 ${username} üçün ilkin otaq siyahısı göndərildi.`);
-    } catch (error) {
-        console.error(`❌ ${username} üçün ilkin otaq siyahısı göndərilərkən xəta:`, error);
+/**
+ * Verilmiş ölçü üçün bütün mümkün qazanma xətlərini yaradır.
+ * @param {number} size - Lövhənin ölçüsü (3-6).
+ * @returns {number[][]} - Qazanan indeks kombinasiyaları.
+ */
+function generateWinConditions(size) {
+    const lines = [];
+    const n = size;
+    const winLength = size >= 5 ? 4 : 3; // 5x5 və 6x6 üçün 4, digərləri üçün 3
+
+    if (winLength > n) return []; // Qazanmaq mümkün deyil
+
+    // Üfüqi
+    for (let r = 0; r < n; r++) {
+        for (let c = 0; c <= n - winLength; c++) {
+            lines.push(Array.from({ length: winLength }, (_, i) => r * n + c + i));
+        }
     }
-  
-  
-    // Klientdən 'createRoom' hadisəsi gəldikdə işə düşür
-    socket.on('createRoom', async (roomName) => {
-       // Əgər istifadəçi giriş etməyibsə (userId yoxdursa), otaq yarada bilməz
-       if (!userId) {
-           console.error(`⚠️ Otaq yaratmaq mümkün deyil: İstifadəçi giriş etməyib (Socket ID: ${socket.id})`);
-           socket.emit('error', { message: 'Otaq yaratmaq üçün giriş etməlisiniz.' }); // Klientə xəta mesajı göndəririk
-           return; // Funksiyanı dayandırırıq
-       }
-  
-       // Unikal otaq ID-si yaradırıq (zaman + təsadüfi sətir)
-       const roomId = `room_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-       // Redis-də otaq məlumatlarını saxlamaq üçün açar (key)
-       const roomKey = `room:${roomId}`;
-       // Redis-də bu socket-in hansı otaqda olduğunu saxlamaq üçün açar
-       const playerSocketKey = `socket:${socket.id}:room`;
-  
-       console.log(`➕ ${username} otaq yaradır: ${roomName || roomId}`);
-  
-       try {
-           // ---- Vacib: Əvvəlki Otaqdan Çıxış ----
-           // İstifadəçi artıq başqa bir otaqdadırsa, onu həmin otaqdan avtomatik çıxarırıq
-           // Bu, 'disconnect' və 'leaveRoom' üçün də istifadə edəcəyimiz ümumi funksiyadır (növbəti hissələrdə təyin edəcəyik)
-           // Hələlik, fərz edək ki, `handleDisconnectOrLeave` adlı bir funksiya var
-           await handleDisconnectOrLeave(socket, pubClient); // Redis clientini ötürürük
-  
-           // ---- Redis Əməliyyatları ----
-           // 1. Otaq Məlumatlarını Hash-da Saxlamaq:
-           //    `hSet` əmri ilə 'room:roomId' açarında bir Hash yaradırıq və sahələrini təyin edirik.
-           await pubClient.hSet(roomKey, {
-               id: roomId,
-               name: roomName || `Otaq ${roomId.substring(5, 10)}`, // Əgər ad verilməyibsə, default ad
-               playerCount: '1', // Yaradan şəxs ilk oyunçudur
-               maxPlayers: '2', // Tic Tac Toe üçün 2 oyunçu
-               status: 'waiting', // İlkin status: gözləmədə
-               creatorId: userId.toString(), // Otağı kimin yaratdığını qeyd edirik
-               // Gələcəkdə oyun lövhəsi kimi məlumatları da burada saxlaya bilərsiniz:
-               // 'board': JSON.stringify(Array(9).fill(null)),
-               // 'turn': socket.id // İlk növbə kimdədir
-           });
-  
-           // 2. Oyunçunu Otağın Oyunçular Set-inə Əlavə Etmək:
-           //    `sAdd` əmri ilə 'room:roomId:players' açarındakı Set-ə oyunçunun socket ID-sini əlavə edirik.
-           await pubClient.sAdd(`${roomKey}:players`, socket.id);
-  
-           // 3. Oyunçunun Hansı Otaqda Olduğunu Qeyd Etmək:
-           //    `set` əmri ilə 'socket:socketId:room' açarına otağın ID-sini yazırıq.
-           await pubClient.set(playerSocketKey, roomId);
-  
-           // 4. Otaq ID-sini Aktiv Otaqlar Set-inə Əlavə Etmək:
-           //    `sAdd` əmri ilə 'activeRooms' Set-inə bu otağın açarını (`roomKey`) əlavə edirik.
-           await pubClient.sAdd('activeRooms', roomKey);
-  
-           // ---- Socket.IO Otağına Qoşulma ----
-           // Bu, mesajların yalnız həmin otaqdakı klientlərə getməsi üçündür ('io.to(roomId).emit(...)')
-           socket.join(roomId);
-           console.log(`✅ ${username} (Socket: ${socket.id}) "${roomId}" otağını yaratdı və qoşuldu.`);
-  
-           // ---- Klientə və Digərlərinə Məlumat Göndərmək ----
-           // a) Otağı yaradan klientə uğurlu qoşulma mesajı göndəririk
-           const finalRoomName = await pubClient.hGet(roomKey, 'name'); // Otağın adını Redis-dən alırıq
-           socket.emit('joinedRoom', { roomId: roomId, roomName: finalRoomName });
-  
-           // b) BÜTÜN klientlərə (lobbidə olanlara) yenilənmiş otaq siyahısını göndəririk
-           await broadcastRoomList(pubClient); // Yardımçı funksiyamızı çağırırıq
-  
-       } catch (error) {
-           console.error(`❌ "${roomId}" otağı ${username} tərəfindən yaradılarkən xəta baş verdi:`, error);
-           // Klientə ümumi xəta mesajı göndəririk
-           socket.emit('error', { message: 'Otaq yaradılarkən xəta baş verdi.' });
-  
-           // Xəta baş verərsə, yarımçıq qala biləcək Redis qeydlərini təmizləməyə çalışırıq
-           try {
-               console.log(`🧹 Cleaning up potentially inconsistent Redis keys for failed room ${roomId}...`);
-               await pubClient.del(roomKey); // Otaq Hash-ını sil
-               await pubClient.del(playerSocketKey); // Oyunçu-otaq qeydini sil
-               await pubClient.sRem('activeRooms', roomKey); // Aktiv otaqlar siyahısından sil
-           } catch (cleanupError) {
-               console.error(`❌ Yarımçıq ${roomId} otağının təmizlənməsi zamanı xəta:`, cleanupError);
-           }
-           // Hər ehtimala qarşı otaq siyahısını yenidən yayımlayırıq
-           await broadcastRoomList(pubClient);
-       }
-    }); // 'createRoom' hadisəsinin sonu
-  
-    // Digər socket hadisələri ('joinRoom', 'disconnect', 'makeMove' və s.) bura əlavə olunacaq...
-  
-  }); // io.on('connection', ...) funksiyasının sonu
-  // --- END Socket.IO Məntiqi ---
-  // BU KOD io.on('connection', ...) BLOKUNUN DAXİLİNƏ ƏLAVƏ EDİLMƏLİDİR:
-// (socket.on('createRoom', ...) listener-ından sonra)
+    // Şaquli
+    for (let c = 0; c < n; c++) {
+        for (let r = 0; r <= n - winLength; r++) {
+            lines.push(Array.from({ length: winLength }, (_, i) => (r + i) * n + c));
+        }
+    }
+    // Diaqonal (\)
+    for (let r = 0; r <= n - winLength; r++) {
+        for (let c = 0; c <= n - winLength; c++) {
+            lines.push(Array.from({ length: winLength }, (_, i) => (r + i) * n + (c + i)));
+        }
+    }
+    // Diaqonal (/)
+    for (let r = 0; r <= n - winLength; r++) {
+        for (let c = winLength - 1; c < n; c++) {
+            lines.push(Array.from({ length: winLength }, (_, i) => (r + i) * n + (c - i)));
+        }
+    }
+    return lines;
+}
 
-  // Klientdən 'joinRoom' hadisəsi gəldikdə işə düşür
-  socket.on('joinRoom', async (roomId) => {
-    // Giriş etməyibsə, qoşula bilməz
-    if (!userId) {
-        console.error(`⚠️ Otağa qoşulmaq mümkün deyil: İstifadəçi giriş etməyib (Socket ID: ${socket.id})`);
-        socket.emit('error', { message: 'Otağa qoşulmaq üçün giriş etməlisiniz.' });
+/**
+ * Oyunçunun lövhədə qazanıb qazanmadığını yoxlayır.
+ * @param {object} room - Otaq obyekti.
+ * @param {'X' | 'O'} playerSymbolToCheck - Yoxlanılacaq simvol.
+ * @returns {boolean} - Qazanıbsa true.
+ */
+function checkWinServer(room, playerSymbolToCheck) {
+    if (!room?.gameState?.board || !playerSymbolToCheck) return false;
+    const state = room.gameState;
+    const board = state.board;
+    const size = state.boardSize;
+    state.winningCombination = []; // Əvvəlki qalibi təmizlə
+
+    const winConditions = generateWinConditions(size);
+    if (winConditions.length === 0 && size > 0) {
+        console.error(`[Game Logic 2.2] checkWinServer: ${size}x${size} üçün qazanma şərtləri yaradıla bilmədi!`);
+        return false;
+    }
+
+    for (const condition of winConditions) {
+        if (board[condition[0]] === playerSymbolToCheck && condition.every(index => board[index] === playerSymbolToCheck)) {
+            state.winningCombination = condition;
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Oyun sırasını aktiv olan digər oyunçuya keçirir.
+ * @param {object} room - Otaq obyekti.
+ */
+function switchTurnServer(room) {
+    if (!room?.gameState || room.gameState.isGameOver || room.gameState.gamePhase !== 'playing' || !room.gameState.player1?.symbol || !room.gameState.player2?.symbol) {
         return;
     }
+    const state = room.gameState;
+    const p1Active = state.player1.socketId && !state.player1.isDisconnected;
+    const p2Active = state.player2.socketId && !state.player2.isDisconnected;
 
-    // Redis açarlarını hazırlayırıq
-    const roomKey = `room:${roomId}`;
-    const playerSocketKey = `socket:${socket.id}:room`;
+    if (p1Active && p2Active) { // Hər ikisi aktivdirsə
+         state.currentPlayerSymbol = (state.currentPlayerSymbol === state.player1.symbol)
+            ? state.player2.symbol
+            : state.player1.symbol;
+    } else if (p1Active) { // Yalnız P1 aktivdirsə
+        state.currentPlayerSymbol = state.player1.symbol;
+    } else if (p2Active) { // Yalnız P2 aktivdirsə
+         state.currentPlayerSymbol = state.player2.symbol;
+    } else { // Heç kim aktiv deyilsə
+         state.currentPlayerSymbol = null;
+    }
+    // console.log(`[Game Logic 2.2] Sıra dəyişdi. Yeni sıra: ${state.currentPlayerSymbol}`);
+}
 
-    console.log(`➡️ ${username} (Socket: ${socket.id}) "${roomId}" otağına qoşulmağa cəhd edir`);
-
+/**
+ * Verilmiş otağın hazırkı oyun vəziyyətini (gameState) otaqdakı clientlərə göndərir.
+ * @param {string} roomId - Otaq ID-si.
+ * @param {string} [triggeringEvent='N/A'] - Hadisə (log üçün).
+ */
+function emitGameStateUpdate(roomId, triggeringEvent = 'N/A') {
     try {
-        // ---- Otağın Vəziyyətini Yoxlamaq ----
-        // 1. Otaq Redis-də mövcuddurmu?
-        const roomExists = await pubClient.exists(roomKey);
-        if (!roomExists) {
-            console.log(`🚪 Otaq ${roomId} mövcud deyil.`);
-            socket.emit('error', { message: 'Otaq mövcud deyil və ya silinib.' });
-            // Otaq silinibse, lobbi siyahısını yeniləyək ki, klientdə də itsin
-            await broadcastRoomList(pubClient);
+        const room = rooms[roomId];
+        if (!room?.gameState) {
+            console.warn(`[State Emitter 2.3] emitGameStateUpdate: Otaq (${roomId}) və ya gameState tapılmadı. Trigger: ${triggeringEvent}`);
             return;
         }
+        const stateToSend = room.gameState;
+        console.log(`[State Emitter 2.3] Otağa (${roomId}) gameState göndərilir. Trigger: ${triggeringEvent}, Phase: ${stateToSend.gamePhase}, Status: "${stateToSend.statusMessage}"`);
+        io.to(roomId).emit('game_state_update', stateToSend);
+    } catch (error) {
+        console.error(`[State Emitter ERROR] emitGameStateUpdate zamanı xəta (RoomID: ${roomId}, Trigger: ${triggeringEvent}):`, error);
+    }
+}
 
-        // 2. Otaq doludurmu?
-        //    `hmGet` ilə eyni anda bir neçə sahəni oxuya bilərik
-        const [playerCountStr, maxPlayersStr] = await pubClient.hmGet(roomKey, ['playerCount', 'maxPlayers']);
-        const playerCount = parseInt(playerCountStr || '0', 10);
-        const maxPlayers = parseInt(maxPlayersStr || '2', 10);
+console.log('--- Part 2/7 Tamamlandı ---');
+// ==============================
+// ===== PART 2/7 SONU ==========
+// ==============================
 
-        if (playerCount >= maxPlayers) {
-            console.log(`🈵 Otaq ${roomId} doludur.`);
-            socket.emit('error', { message: 'Otaq artıq doludur.' });
-            return; // Qoşulmaya icazə vermirik
+// Növbəti hissə (Part 3/7) burada başlayacaq...
+// =======================================================
+// ===== Part 3/7: HTTP API Endpoints (Auth, Profile) ======
+// =======================================================
+
+// ----- HTTP API MARŞRUTLARI -----
+
+// Qeyd: isAuthenticated middleware Part 1-də təyin edilmişdi,
+// amma burada istifadə olunur. Əgər Part 1-də yoxdursa,
+// bu endpointlərdən əvvəl təyin edilməlidir:
+/*
+const isAuthenticated = (req, res, next) => {
+    if (req.session?.user?.id) {
+        return next();
+    }
+    console.warn(`[Auth Check 1.2] HTTP FAILED - Giriş tələb olunur. Path: ${req.originalUrl}`);
+    return res.status(401).json({ loggedIn: false, message: 'Bu əməliyyat üçün giriş tələb olunur.' });
+};
+*/
+
+// ----- Qeydiyyat Endpoint-i (/register) -----
+app.post('/register', async (req, res) => {
+    const { fullName, email, nickname, password } = req.body;
+
+    // Sadə validasiya
+    if (!fullName || !email || !nickname || !password || password.length < 6 || nickname.length < 3 || /\s/.test(nickname)) {
+        console.log('[Register FAIL] Validasiya uğursuz: Form məlumatları natamam/yanlış.');
+        return res.status(400).json({ success: false, message: 'Form məlumatları natamam və ya yanlışdır (nickname min 3 hərf, boşluqsuz; şifrə min 6 hərf).' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+         console.log('[Register FAIL] Validasiya uğursuz: Yanlış email formatı.');
+         return res.status(400).json({ success: false, message: 'Düzgün e-poçt ünvanı daxil edin.' });
+    }
+
+    try {
+        // Eyni email və ya nickname yoxlanışı (case-insensitive)
+        const checkUser = await pool.query('SELECT email, nickname FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(nickname) = LOWER($2) LIMIT 1', [email, nickname]);
+
+        if (checkUser.rows.length > 0) {
+            const existing = checkUser.rows[0];
+            let message = (existing.email.toLowerCase() === email.toLowerCase() && existing.nickname.toLowerCase() === nickname.toLowerCase())
+                ? 'Bu email və nickname artıq istifadə olunur.'
+                : (existing.email.toLowerCase() === email.toLowerCase() ? 'Bu email artıq istifadə olunur.' : 'Bu nickname artıq istifadə olunur.');
+            console.log(`[Register FAIL] İstifadəçi artıq mövcuddur: ${message}`);
+            return res.status(409).json({ success: false, message: message }); // 409 Conflict
         }
 
-        // ---- Vacib: Əvvəlki Otaqdan Çıxış ----
-        // Qoşulmazdan əvvəl istifadəçinin başqa bir otaqda olub olmadığını yoxlayıb çıxarırıq
-        await handleDisconnectOrLeave(socket, pubClient);
+        // Parolu hash et
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-        // ---- Redis Əməliyyatları ----
-        // 1. Oyunçunu Otağın Oyunçular Set-inə Əlavə Etmək:
-        await pubClient.sAdd(`${roomKey}:players`, socket.id);
+        // Yeni istifadəçini bazaya əlavə et
+        const newUserQuery = `INSERT INTO users (full_name, email, nickname, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, nickname`;
+        const newUser = await pool.query(newUserQuery, [fullName, email, nickname, hashedPassword]);
 
-        // 2. Oyunçunun Hansı Otaqda Olduğunu Qeyd Etmək:
-        await pubClient.set(playerSocketKey, roomId);
+        console.log(`[Register OK] İstifadəçi qeydiyyatdan keçdi: ${newUser.rows[0].nickname} (ID: ${newUser.rows[0].id})`);
+        res.status(201).json({ success: true, message: 'Qeydiyyat uğurlu oldu!', nickname: newUser.rows[0].nickname }); // 201 Created
 
-        // 3. Otağın Oyunçu Sayını Artırmaq:
-        //    `hIncrBy` atomik əməliyyatdır, eyni anda çox sayda qoşulma olsa belə düzgün işləyir.
-        const newPlayerCount = await pubClient.hIncrBy(roomKey, 'playerCount', 1);
-        console.log(`📊 "${roomId}" otağının oyunçu sayı ${newPlayerCount}-ə yüksəldi.`);
+    } catch (error) {
+        console.error('[Register ERROR] Qeydiyyat zamanı DB xətası:', error);
+        res.status(500).json({ success: false, message: 'Server xətası baş verdi. Daha sonra yenidən cəhd edin.' });
+    }
+});
 
+// ----- Giriş Endpoint-i (/login) -----
+app.post('/login', async (req, res) => {
+    const { nickname, password } = req.body;
 
-        // ---- Socket.IO Otağına Qoşulma ----
-        socket.join(roomId);
-        console.log(`✅ ${username} (Socket: ${socket.id}) "${roomId}" otağına qoşuldu.`);
+    if (!nickname || !password) {
+        console.log('[Login FAIL] Boş nickname və ya parol.');
+        return res.status(400).json({ success: false, message: 'Nickname və şifrə daxil edilməlidir.' });
+    }
 
-        // ---- Klientə və Digərlərinə Məlumat Göndərmək ----
-        // a) Qoşulan klientə uğurlu qoşulma mesajı göndəririk
-        const roomName = await pubClient.hGet(roomKey, 'name'); // Otağın adını alırıq
-        socket.emit('joinedRoom', { roomId, roomName });
+    try {
+        // İstifadəçini nickname ilə axtar (case-insensitive)
+        const result = await pool.query('SELECT * FROM users WHERE LOWER(nickname) = LOWER($1)', [nickname]);
 
-        // b) Otaqdakı DİGƏR oyunçu(lar)a yeni oyunçunun qoşulduğunu bildiririk
-        //    `socket.to(roomId)` mesajı göndərən socket xaric, otaqdakı hər kəsə göndərir.
-        socket.to(roomId).emit('playerJoined', { username, userId, socketId: socket.id });
+        if (result.rows.length === 0) {
+            console.log(`[Login FAIL] İstifadəçi tapılmadı: ${nickname}`);
+            return res.status(401).json({ success: false, message: 'Nickname və ya şifrə yanlışdır.' }); // 401 Unauthorized
+        }
 
-        // c) BÜTÜN klientlərə (lobbidə olanlara) yenilənmiş otaq siyahısını göndəririk
-        await broadcastRoomList(pubClient);
+        const user = result.rows[0];
+        const match = await bcrypt.compare(password, user.password_hash);
 
-        // d) Əgər otaq bu oyunçu ilə dolursa, oyunu başlatmaq üçün siqnal göndəririk
-        if (newPlayerCount === maxPlayers) {
-            console.log(`🏁 Otaq ${roomId} doldu. Oyun başlada bilər.`);
-            // Otağın statusunu 'playing' olaraq yeniləyə bilərik (istəyə bağlı)
-            await pubClient.hSet(roomKey, 'status', 'playing');
-            // Otaqdakı hər kəsə (qoşulan daxil) 'gameStart' hadisəsini göndəririk
-            io.to(roomId).emit('gameStart');
-            // Oyun lövhəsini və ilk növbəni burada sıfırlaya/təyin edə bilərsiniz
-            // await pubClient.hSet(roomKey, 'board', JSON.stringify(Array(9).fill(null)));
-            // const players = await getPlayersInRoom(pubClient, roomId);
-            // await pubClient.hSet(roomKey, 'turn', players[Math.floor(Math.random() * players.length)]); // Təsadüfi ilk növbə
+        if (match) {
+            // Sessiyanı qur
+            req.session.user = {
+                id: user.id,
+                nickname: user.nickname,
+                fullName: user.full_name,
+                email: user.email
+            };
+            console.log(`[Login OK] İstifadəçi giriş etdi: ${user.nickname} (ID: ${user.id}), Session ID: ${req.session.id}`);
+            res.status(200).json({ // Status 200 OK
+                success: true,
+                message: 'Giriş uğurludur!',
+                nickname: user.nickname
+            });
+        } else {
+            console.log(`[Login FAIL] Parol səhvdir: ${user.nickname}`);
+            res.status(401).json({ success: false, message: 'Nickname və ya şifrə yanlışdır.' }); // 401 Unauthorized
         }
 
     } catch (error) {
-        console.error(`❌ "${roomId}" otağına ${username} qoşularkən xəta baş verdi:`, error);
-        socket.emit('error', { message: 'Otağa qoşularkən xəta baş verdi.' });
-        // Qoşulma xətası olarsa, potensial olaraq əlavə edilmiş qeydləri geri qaytarmaq cəhdi
-        try {
-            const currentRoom = await pubClient.get(playerSocketKey);
-            // Yalnız bu otağa aid qeydi silməyə çalışırıq (əgər yazılıbsa)
-            if (currentRoom === roomId) {
-                await pubClient.sRem(`${roomKey}:players`, socket.id);
-                await pubClient.del(playerSocketKey);
-                // Sayğacı geri azaltmaq vacibdir
-                await pubClient.hIncrBy(roomKey, 'playerCount', -1);
-            }
-        } catch (cleanupError) {
-             console.error(`❌ Qoşulma xətası sonrası ${roomId} üçün təmizləmə zamanı xəta:`, cleanupError);
-        }
-        // Hər ehtimala qarşı otaq siyahısını yenidən yayımlayırıq
-        await broadcastRoomList(pubClient);
+        console.error('[Login ERROR] Giriş zamanı xəta:', error);
+        res.status(500).json({ success: false, message: 'Server xətası baş verdi.' });
     }
- }); // 'joinRoom' hadisəsinin sonu
+});
+
+// ----- Autentifikasiya Vəziyyətini Yoxlama Endpoint-i (/check-auth) -----
+app.get('/check-auth', (req, res) => {
+    if (req.session?.user?.id) {
+        // console.log(`[/check-auth OK] Sessiya aktivdir: ${req.session.user.nickname}`);
+        res.status(200).json({ // Status 200 OK
+            loggedIn: true,
+            user: req.session.user // Client üçün user məlumatını da göndər
+        });
+    } else {
+        // console.log('[/check-auth FAIL] Aktiv sessiya tapılmadı.');
+        res.status(200).json({ loggedIn: false, user: null }); // Client tərəfdə xəta çıxmasın deyə 200 OK
+    }
+});
+
+// ----- Çıxış Endpoint-i (/logout) -----
+app.post('/logout', (req, res) => {
+    const userNickname = req.session?.user?.nickname || 'Bilinməyən';
+    console.log(`[/logout] Çıxış sorğusu alındı: User=${userNickname}`);
+    req.session.destroy(err => {
+        if (err) {
+            console.error('[/logout ERROR] Sessiya məhv edilərkən xəta:', err);
+            return res.status(500).json({ success: false, message: 'Çıxış zamanı server xətası.' });
+        }
+        res.clearCookie('connect.sid'); // Sessiya cookie-sini sil ('connect.sid' default addır)
+        console.log(`[/logout OK] Sessiya məhv edildi: User=${userNickname}`);
+        res.status(200).json({ success: true, message: 'Uğurla çıxış edildi.' }); // Status 200 OK
+    });
+});
+
+// ----- Profil Yeniləmə Endpoint-i (/profile/:nickname) -----
+// isAuthenticated middleware yalnız giriş etmiş istifadəçilər üçün icazə verir.
+app.put('/profile/:nickname', isAuthenticated, async (req, res) => {
+    const targetNickname = req.params.nickname;
+    const loggedInUserId = req.session.user.id;
+    const loggedInNickname = req.session.user.nickname;
+    const { fullName, email, nickname: newNickname, password } = req.body;
+
+    console.log(`[/profile UPDATE] Sorğu alındı: Target=${targetNickname}, Requester=${loggedInNickname}`);
+
+    // --- Validasiya və İcazə ---
+    if (targetNickname.toLowerCase() !== loggedInNickname.toLowerCase()) {
+        console.warn(`[/profile UPDATE FAIL] İcazəsiz cəhd: ${loggedInNickname} -> ${targetNickname}`);
+        return res.status(403).json({ success: false, message: 'Yalnız öz profilinizi yeniləyə bilərsiniz.' }); // 403 Forbidden
+    }
+    if (!fullName || !email || !newNickname || newNickname.length < 3 || /\s/.test(newNickname)) {
+        return res.status(400).json({ success: false, message: 'Ad Soyad, Email və Nickname boş ola bilməz (nickname min 3 hərf, boşluqsuz).' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ success: false, message: 'Düzgün e-poçt ünvanı daxil edin.' });
+    }
+    if (password && password.length < 6) {
+        return res.status(400).json({ success: false, message: 'Yeni şifrə minimum 6 simvol olmalıdır.' });
+    }
+    // --- Validasiya Sonu ---
+
+    try {
+        // Email/Nickname konflikti yoxlanışı
+        const checkConflict = await pool.query(
+            'SELECT id FROM users WHERE (LOWER(email) = LOWER($1) OR LOWER(nickname) = LOWER($2)) AND id != $3 LIMIT 1',
+            [email, newNickname, loggedInUserId]
+        );
+        if (checkConflict.rows.length > 0) {
+             console.warn(`[/profile UPDATE FAIL] Email/Nickname konflikti.`);
+             return res.status(409).json({ success: false, message: 'Bu email və ya nickname artıq başqa istifadəçi tərəfindən istifadə olunur.' }); // 409 Conflict
+        }
+
+        // Yeniləmə sorğusu
+        let updateQuery = 'UPDATE users SET full_name = $1, email = $2, nickname = $3';
+        const queryParams = [fullName, email, newNickname];
+        let paramIndex = 4;
+        if (password) { // Yeni şifrə varsa
+            const hashedPassword = await bcrypt.hash(password, saltRounds);
+            updateQuery += `, password_hash = $${paramIndex}`;
+            queryParams.push(hashedPassword);
+            paramIndex++;
+            console.log(`[/profile UPDATE] Yeni şifrə hash edildi.`);
+        }
+        updateQuery += ` WHERE id = $${paramIndex} RETURNING id, nickname, full_name, email`;
+        queryParams.push(loggedInUserId);
+
+        // DB-ni yenilə
+        const result = await pool.query(updateQuery, queryParams);
+        if (result.rows.length === 0) {
+            console.error(`[/profile UPDATE ERROR] İstifadəçi yenilənmədi (ID: ${loggedInUserId} tapılmadı?).`);
+            return res.status(404).json({ success: false, message: 'Profil yenilənərkən xəta (istifadəçi tapılmadı).' }); // 404 Not Found
+        }
+
+        const updatedUser = result.rows[0];
+        console.log(`[/profile UPDATE OK] Profil yeniləndi: ${updatedUser.nickname}`);
+
+        // Sessiyanı yenilə
+        req.session.user = {
+            id: updatedUser.id,
+            nickname: updatedUser.nickname,
+            fullName: updatedUser.full_name,
+            email: updatedUser.email
+        };
+        // Sessiyanı yadda saxla
+        req.session.save((err) => {
+            if (err) {
+                 console.error('[/profile UPDATE ERROR] Sessiya yadda saxlanılarkən xəta:', err);
+                 // Xəta olsa belə, DB yeniləndiyi üçün uğurlu cavab göndərək
+                 return res.status(200).json({ success: true, message: 'Profil uğurla yeniləndi! (Sessiya xətası)', updatedUser: req.session.user });
+            }
+             res.status(200).json({ success: true, message: 'Profil uğurla yeniləndi!', updatedUser: req.session.user });
+        });
+
+    } catch (error) {
+        console.error('[/profile UPDATE ERROR] Profil yenilənərkən DB xətası:', error);
+        res.status(500).json({ success: false, message: 'Server xətası baş verdi.' });
+    }
+});
+
+// ----- Kök URL Endpoint-i (/) -----
+// Giriş səhifəsinə yönləndirir
+app.get('/', (req, res) => {
+    res.redirect('/ana_sehife/login/login.html');
+});
 
 
- // Klient 'Otaqdan Ayrıl' düyməsini kliklədikdə
- socket.on('leaveRoom', async () => {
-   console.log(`🚪 ${username} (Socket: ${socket.id}) otaqdan ayrılmaq istəyir.`);
-   // Əsas təmizləmə və yeniləmə məntiqini çağıdırıq
-   await handleDisconnectOrLeave(socket, pubClient);
-   // Klient tərəfə lobbiyə qayıtması üçün siqnal göndərə bilərik (opsional)
-   // socket.emit('redirect', '/OYUNLAR/tictactoe/lobby/test_odalar.html');
-   socket.emit('leftRoom'); // Klientə otaqdan çıxdığını bildiririk ki, UI-ı yeniləsin
- });
+console.log('--- Part 3/7 Tamamlandı ---');
+// ==============================
+// ===== PART 3/7 SONU ==========
+// ==============================
+
+// Növbəti hissə (Part 4/7) burada başlayacaq...
+// ============================================================
+// ===== Part 4/7: Socket.IO Connection & Authentication ======
+// ============================================================
+console.log('[Setup 4.1] Socket.IO üçün middleware konfiqurasiyası başlayır...');
+
+// Express session middleware-ni Socket.IO üçün əlçatan edən yardımçı funksiya
+const wrap = middleware => (socket, next) => middleware(socket.request, {}, next);
+
+// Express session middleware-ni Socket.IO-ya tətbiq et
+io.use(wrap(sessionMiddleware));
+console.log('[Setup 4.1] Express session middleware Socket.IO üçün əlçatan edildi.');
+
+// Socket.IO bağlantıları üçün Autentifikasiya Middleware-i
+io.use((socket, next) => {
+  const session = socket.request.session;
+  // Sessiyanın və içində user məlumatlarının (id və nickname) mövcud olduğunu yoxla
+  if (session && session.user && session.user.id && session.user.nickname) {
+    // socket.user təyin etmək əvəzinə, istifadəçinin autentifikasiyadan keçdiyini bilirik.
+    // İstifadəçi məlumatlarını lazım olduqda users[] obyektindən socket.id ilə götürəcəyik.
+    // Bu, socket.user-in qeyri-stabil olması problemini aradan qaldırır.
+    // console.log(`[Socket Auth 4.1] OK - Session found for Socket ID: ${socket.id}. User ID: ${session.user.id}`);
+    next(); // Bağlantıya icazə ver
+  } else {
+    console.warn(`[Socket Auth 4.1] FAILED - Bağlantı rədd edildi (Sessiya tapılmadı və ya etibarsız). Socket ID: ${socket.id}`);
+    next(new Error('Authentication Error: Giriş edilməyib və ya sessiya bitib.')); // Xəta ilə rədd et
+  }
+});
+console.log('[Setup 4.1] Socket.IO üçün autentifikasiya middleware təyin edildi.');
+
+// ----- Əsas Socket.IO Bağlantı Hadisəsi (`connection`) -----
+console.log('[Setup 4.1] Socket.IO "connection" hadisə dinləyicisi təyin edilir...');
+
+io.on('connection', (socket) => { // <<< --- ƏSAS BAĞLANTI BLOKU BAŞLAYIR (Hələ bağlanmır!) --- <<<
+
+    // Qoşulan istifadəçinin məlumatlarını sessiyadan götürək (auth middleware bunu təmin etdi)
+    const session = socket.request.session;
+    // Hər ehtimala qarşı yenidən yoxlayaq
+    if (!session || !session.user || !session.user.id || !session.user.nickname) {
+        console.error(`[Socket Connect 4.2] XƏTA: Qoşulan soket üçün sessiya məlumatı tapılmadı! Socket ID: ${socket.id}. Bağlantı kəsilir.`);
+        socket.disconnect(true);
+        return;
+    }
+    const connectedUser = { ...session.user }; // Sessiyadakı user məlumatının kopyası
+
+    console.log(`[Socket Connect 4.2] ++ User Qoşuldu: ${connectedUser.nickname} (UserID: ${connectedUser.id}), Socket ID: ${socket.id}`);
+
+    // Köhnə bağlantı yoxlaması (əgər eyni user başqa socketlə bağlıdırsa) - Hələlik deaktivdir
+    /*
+    for (const existingSocketId in users) {
+        if (users[existingSocketId].userId === connectedUser.id && existingSocketId !== socket.id) {
+             // ... köhnə socketi bağlama məntiqi ...
+        }
+    }
+    */
+
+    // Yeni qoşulan istifadəçini qlobal `users` obyektinə əlavə et
+    /// Köhnə bağlantı yoxlaması - users[] obyektindən silmə
+    Object.keys(users).forEach(existingSocketId => {
+    if (users[existingSocketId].userId === connectedUser.id && existingSocketId !== socket.id) {
+         console.warn(`[Socket Connect 4.2 DEBUG] Existing socket found for UserID ${connectedUser.id}. Removing old USERS entry: ${existingSocketId}. New socket: ${socket.id}`); // <<< YENI LOG
+         // const oldSocket = io.sockets.sockets.get(existingSocketId);
+         // if (oldSocket) oldSocket.disconnect(true); // Bunu hələ aktiv etməyək
+         delete users[existingSocketId];
+        }
+    });
+    // Yenisini əlavə et
+    users[socket.id] = {
+        id: socket.id,
+        userId: connectedUser.id,
+        username: connectedUser.nickname,
+        currentRoom: null, // Başlanğıcda heç bir otaqda deyil
+        disconnectTimer: undefined
+    };
+    console.log(`[Socket Connect 4.2] İstifadəçi "${connectedUser.nickname}" (Socket: ${socket.id}) qlobal 'users' obyektinə əlavə edildi/yeniləndi.`);
+
+    // Yeni qoşulan client-ə ilkin otaq siyahısını göndər
+    try {
+        // broadcastRoomList funksiyası Part 2-də təyin edilmişdi
+        const initialRoomList = Object.values(rooms).map(room => {
+             const p1 = room.gameState?.player1;
+             const p2 = room.gameState?.player2;
+             let activePlayerCount = 0;
+             if (p1?.socketId && !p1.isDisconnected) activePlayerCount++;
+             if (p2?.socketId && !p2.isDisconnected) activePlayerCount++;
+             const displayPlayerCount = room.gameState ? activePlayerCount : room.players.length;
+             return {
+                 id: room.id, name: room.name, playerCount: displayPlayerCount, hasPassword: !!room.password,
+                 boardSize: room.boardSize, creatorUsername: room.creatorUsername,
+                 player1Username: (p1?.socketId && !p1.isDisconnected) ? p1.username : null,
+                 player2Username: (p2?.socketId && !p2.isDisconnected) ? p2.username : null,
+                 isAiRoom: false
+             };
+         });
+        socket.emit('room_list_update', initialRoomList);
+        console.log(`[Socket Connect 4.2] İlkin otaq siyahısı (${initialRoomList.length} otaq) ${connectedUser.nickname}-ə göndərildi.`);
+    } catch (listError) {
+        console.error(`[Socket Connect 4.2] İlkin otaq siyahısı göndərilərkən xəta (User: ${connectedUser.nickname}):`, listError);
+        socket.emit('room_list_update', []);
+    }
+
+    // === Növbəti hissələrdə (Part 5, 6, 7) bu blokun içinə digər socket.on() hadisələri əlavə olunacaq ===
 
 
- // Socket bağlantısı hər hansı səbəbdən kəsildikdə (tab bağlandı, internet getdi, vs.)
- socket.on('disconnect', async (reason) => {
-   console.log(`🔌 ${username} (Socket: ${socket.id}) bağlantısı kəsildi. Səbəb: ${reason}`);
-   // Əsas təmizləmə və yeniləmə məntiqini çağıdırıq
-   await handleDisconnectOrLeave(socket, pubClient);
- });
+console.log('--- Part 4/7 Tamamlandı (io.on("connection") bloku açıq qaldı) ---');
+// ==============================
+// ===== PART 4/7 SONU ==========
+// ==============================
+// =============================================================================
+    // ===== Part 5/7: Socket.IO Lobby & Room Management Handlers ======
+    // =============================================================================
+    // Bu kod io.on('connection', (socket) => { ... }); bloku içərisindədir!
 
-// =======================================================================
-// BU FUNKSİYA io.on('connection', ...) BLOKUNDAN KƏNARDA TƏYİN EDİLMƏLİDİR:
-// (Məsələn, digər yardımçı funksiyaların yanında)
+    // --- Yeni otaq yaratma (v8 - GameState dərhal yaradılır, v12 - Robust Info Fetch) ---
+    socket.on('create_room', (data) => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) {
+            console.error(`[create_room v12] Xəta: User/SocketInfo tapılmadı. Socket: ${socketId}`);
+            return socket.emit('creation_error', 'Server xətası: İstifadəçi məlumatları tapılmadı.');
+        }
+        console.log(`[Socket Event 5.1 - create_room v12] Hadisə alındı: User=${user.nickname}, Data=`, data);
+
+        // Validasiya
+        if (!data || !data.name || data.name.trim().length === 0 || data.name.length > 30) { return socket.emit('creation_error', 'Otaq adı etibarsızdır (1-30 simvol).'); }
+        const roomName = data.name.trim();
+        const roomPassword = data.password || null;
+        if (roomPassword && (roomPassword.length < 2 || roomPassword.length > 20)) { return socket.emit('creation_error', 'Şifrə etibarsızdır (2-20 simvol).'); }
+        if (currentUserSocketInfo.currentRoom) { console.warn(`[create_room v12] User ${user.nickname} artıq ${currentUserSocketInfo.currentRoom} otağındadır.`); return socket.emit('creation_error', 'Siz artıq başqa bir otaqdasınız.'); }
+        const MAX_ROOMS = process.env.MAX_ROOMS || 50;
+        if (Object.keys(rooms).length >= MAX_ROOMS) { return socket.emit('creation_error', `Maksimum otaq sayına (${MAX_ROOMS}) çatılıb.`); }
+
+        // Yeni Otaq Yaratmaq
+        const newRoomId = generateRoomId();
+        const validatedBoardSize = Math.max(3, Math.min(6, parseInt(data.boardSize, 10) || 3));
+        const newRoom = { id: newRoomId, name: roomName, password: roomPassword, players: [socketId], boardSize: validatedBoardSize, creatorUsername: user.nickname, gameState: null, isAiRoom: false, disconnectTimers: {} };
+
+        // GameState-i dərhal yarat (Funksiya Part 2-də təyin edilib)
+        const initialGameState = initializeGameState(newRoom);
+        if (!initialGameState) {
+             console.error(`[create_room v12] initializeGameState xətası!`);
+             if(currentUserSocketInfo) currentUserSocketInfo.currentRoom = null;
+             return socket.emit('creation_error', 'Oyun vəziyyəti yaradılarkən xəta baş verdi.');
+        }
+        newRoom.gameState = initialGameState;
+
+        rooms[newRoomId] = newRoom;
+        currentUserSocketInfo.currentRoom = newRoomId; // users[] obyektini yenilə
+        socket.join(newRoomId);
+        console.log(`[Socket Event 5.1 v12] Otaq yaradıldı və gameState başladıldı: ID=${newRoomId}, Ad='${newRoom.name}', Phase=${newRoom.gameState.gamePhase}`);
+        broadcastRoomList(); // Lobbini yenilə
+        socket.emit('room_joined', { roomId: newRoom.id, roomName: newRoom.name, boardSize: newRoom.boardSize });
+   }); // --- 'create_room' sonu ---
+
+
+   // --- Mövcud otağa qoşulma (Lobbiden - v12 Robust Info Fetch) ---
+    socket.on('join_room', (data) => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) { return socket.emit('join_error', 'Server xətası: İstifadəçi məlumatları tapılmadı.'); }
+        if (!data || !data.roomId) { return socket.emit('join_error', 'Otaq ID göndərilmədi.'); }
+        const roomId = data.roomId; const room = rooms[roomId];
+        console.log(`[Socket Event 5.2 - join_room v12] Hadisə alındı: User=${user.nickname}, RoomID=${roomId}`);
+
+        if (!room) { broadcastRoomList(); return socket.emit('join_error', 'Otaq tapılmadı.'); }
+        if (room.password && room.password !== data.password) { return socket.emit('join_error', 'Şifrə yanlışdır.'); }
+
+        // Aktiv oyunçu sayını hesabla (broadcastRoomList-dəki kimi)
+        let activePlayerCount = 0;
+        if (room.gameState?.player1?.socketId && !room.gameState.player1.isDisconnected) activePlayerCount++;
+        if (room.gameState?.player2?.socketId && !room.gameState.player2.isDisconnected) activePlayerCount++;
+        const currentCount = room.gameState ? activePlayerCount : room.players.length;
+
+        // Eyni user ID ilə aktiv oyunçu artıq otaqda varmı?
+        const userAlreadyInRoom = (room.gameState?.player1?.userId === user.id && !room.gameState.player1.isDisconnected) ||
+                                 (room.gameState?.player2?.userId === user.id && !room.gameState.player2.isDisconnected);
+
+        if (currentCount >= 2 && !userAlreadyInRoom) {
+            console.warn(`[join_room v12] Otaq ${roomId} dolu (Count: ${currentCount}). Qoşulma rədd edildi: ${user.nickname}`);
+            return socket.emit('join_error', 'Otaq doludur.');
+        }
+        if (currentUserSocketInfo.currentRoom && currentUserSocketInfo.currentRoom !== roomId) {
+            console.warn(`[join_room v12] User ${user.nickname} artıq ${currentUserSocketInfo.currentRoom} otağındadır.`);
+            return socket.emit('join_error', 'Siz artıq başqa bir otaqdasınız.');
+        }
+
+        console.log(`[join_room v12] User ${user.nickname} joining room ${roomId}. Sending room_joined.`);
+        socket.emit('room_joined', { roomId: room.id, roomName: room.name, boardSize: room.boardSize });
+        // Əsas qoşulma məntiqi player_ready_in_room-da baş verəcək
+    }); // --- 'join_room' sonu ---
+
+
+   // --- Otaq parametrlərini yeniləmə (v12 - Robust Info Fetch) ---
+    socket.on('update_room_settings', (data) => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo || !data?.roomId) { return socket.emit('update_room_settings_result', { success: false, message: 'Keçərsiz sorğu.' }); }
+        const roomId = data.roomId; const room = rooms[roomId];
+        if (!room) return socket.emit('update_room_settings_result', { success: false, message: 'Otaq tapılmadı.' });
+        if (room.creatorUsername !== user.nickname) return socket.emit('update_room_settings_result', { success: false, message: 'Yalnız yaradan parametrləri dəyişə bilər.' });
+
+        const isGameInProgress = room.gameState && room.gameState.gamePhase !== 'waiting' && room.gameState.gamePhase !== 'game_over';
+        if (isGameInProgress && data.newBoardSize && parseInt(data.newBoardSize, 10) !== room.boardSize) { return socket.emit('update_room_settings_result', { success: false, message: 'Oyun davam edərkən lövhə ölçüsü dəyişdirilə bilməz.' }); }
+
+        console.log(`[Socket Event 5.4 - update_room_settings v12] Hadisə alındı: RoomID=${roomId}, User=${user.nickname}`);
+        let updated = false; let stateReset = false;
+
+        // Adı yenilə
+        const newName = data.newName?.trim().slice(0, 30);
+        if (newName && newName.length > 0 && newName !== room.name) { room.name = newName; updated = true; console.log(`[update_room_settings v12] Ad dəyişdi: '${room.name}'`); }
+
+        // Şifrəni yenilə
+        if (data.newPassword !== undefined) {
+            const newPass = data.newPassword || null;
+            if (newPass && (newPass.length < 2 || newPass.length > 20)) return socket.emit('update_room_settings_result', { success: false, message: 'Yeni şifrə etibarsızdır (2-20 simvol).' });
+            if (newPass !== room.password) { room.password = newPass; updated = true; console.log(`[update_room_settings v12] Şifrə statusu dəyişdi: ${newPass ? 'Şifrəli' : 'Açıq'}`); }
+        }
+
+        // Lövhə ölçüsünü yenilə
+        if (data.newBoardSize && !isGameInProgress) {
+            const newSize = Math.max(3, Math.min(6, parseInt(data.newBoardSize, 10) || room.boardSize));
+            if (newSize !== room.boardSize) {
+                 room.boardSize = newSize; updated = true; console.log(`[update_room_settings v12] Lövhə ölçüsü dəyişdi: ${newSize}x${newSize}`);
+                 if (room.gameState) { // Əgər oyun artıq başlayıbsa (waiting/game_over)
+                    console.log(`[update_room_settings v12] Board size dəyişdi, gameState sıfırlanır.`);
+                    initializeGameState(room); // State-i yeni ölçü ilə sıfırla
+                    stateReset = true; // Sıfırlandığını qeyd et
+                    // emitGameStateUpdate dərhal çağırılmayacaq, sonda ediləcək
+                 }
+            }
+        }
+
+        if (updated) {
+            broadcastRoomList(); // Lobbini yenilə
+            socket.emit('update_room_settings_result', { success: true, message: 'Otaq parametrləri yeniləndi!' });
+            // Rəqibə də bildir (əgər varsa və state sıfırlanıbsa, ona yeni state göndər)
+            const opponentSocketId = room.players.find(pId => pId !== socketId);
+            const opponentSocket = opponentSocketId ? io.sockets.sockets.get(opponentSocketId) : null;
+            if (opponentSocket) {
+                 opponentSocket.emit('info_message', { message: 'Otaq parametrləri dəyişdirildi.' });
+                 if (stateReset) { // Əgər state sıfırlanıbsa, ona da göndər
+                     emitGameStateUpdate(roomId, 'room_settings_updated_state_reset');
+                 }
+            }
+            // Əgər state sıfırlanıbsa, yaradana da göndər
+            if(stateReset) {
+                 emitGameStateUpdate(roomId, 'room_settings_updated_state_reset');
+            }
+        } else {
+            socket.emit('update_room_settings_result', { success: true, message: 'Heç bir dəyişiklik edilmədi.' });
+        }
+    }); // --- 'update_room_settings' sonu ---
+
+
+   // --- Otağı silmə (v12 - Robust Info Fetch) ---
+    socket.on('delete_room', (data) => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo || !data?.roomId) return socket.emit('delete_error', 'Keçərsiz sorğu.');
+        const roomId = data.roomId; const room = rooms[roomId];
+        if (!room) return socket.emit('delete_error', 'Silinəcək otaq tapılmadı.');
+        if (room.creatorUsername !== user.nickname) return socket.emit('delete_error', 'Yalnız otağı yaradan silə bilər.');
+
+        console.log(`[Socket Event 5.5 - delete_room v12] Hadisə alındı: RoomID=${roomId}, User=${user.nickname}`);
+        const roomName = room.name; // Adını silmədən əvvəl götürək
+
+        // Otaqdakı bütün oyunçuları məlumatlandır və otaqdan çıxart
+        const playersInRoom = [...room.players];
+        playersInRoom.forEach(playerId => {
+            const playerSocket = io.sockets.sockets.get(playerId);
+            const playerUserInfo = users[playerId]; // users-dən götür
+            if (playerSocket) {
+                playerSocket.emit('room_deleted_kick', { message: `'${roomName}' otağı yaradan tərəfindən silindi.` });
+                playerSocket.leave(roomId);
+                // İstifadəçinin mövcud otağını users[]-da sıfırla
+                if (playerUserInfo) playerUserInfo.currentRoom = null;
+                // Oyunçu yaradan deyilsə, bağlantısını kəsməyə ehtiyac yoxdur, özü çıxacaq
+                // Amma yaradanın öz socketi kəsilməlidirmi? Yox, onsuz da o event göndərib
+            } else {
+                 // Socket tapılmasa belə users[]-ı təmizlə
+                 if (playerUserInfo) playerUserInfo.currentRoom = null;
+            }
+        });
+
+        // Otağı qlobal siyahıdan sil
+        delete rooms[roomId];
+        // Silinmə taymerini təmizlə
+        if (roomCleanupTimers[roomId]) { clearTimeout(roomCleanupTimers[roomId]); delete roomCleanupTimers[roomId]; }
+        console.log(`[State 5.5 v12] Otaq ${roomId} ('${roomName}') silindi.`);
+        broadcastRoomList(); // Lobbini yenilə
+    }); // --- 'delete_room' sonu ---
+
+
+   // --- Rəqibi otaqdan çıxarma (v12 - Robust Info Fetch) ---
+    socket.on('kick_opponent', (data) => {
+         const socketId = socket.id;
+         const currentUserSocketInfo = users[socketId];
+         const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+         if (!user || !currentUserSocketInfo || !data?.roomId) return socket.emit('kick_error', 'Keçərsiz sorğu.');
+         const roomId = data.roomId; const room = rooms[roomId];
+         if (!room) return socket.emit('kick_error', 'Otaq tapılmadı.');
+         if (room.creatorUsername !== user.nickname) return socket.emit('kick_error', 'Yalnız yaradan rəqibi çıxara bilər.');
+         const opponentSocketId = room.players.find(pId => pId !== socketId);
+         if (!opponentSocketId) return socket.emit('kick_error', 'Otaqda çıxarılacaq rəqib yoxdur.');
+
+         console.log(`[Socket Event 5.6 - kick_opponent v12] Hadisə alındı: Kicker=${user.nickname}, Kicked=${opponentSocketId}`);
+         const opponentSocket = io.sockets.sockets.get(opponentSocketId);
+         const opponentUserInfo = users[opponentSocketId]; // users[]-dan götür
+         const opponentName = opponentUserInfo?.username || 'Rəqib';
+
+         // Rəqibə məlumat ver və otaqdan/serverdən çıxart
+         if (opponentSocket) {
+             opponentSocket.emit('room_deleted_kick', { message: `'${room.name}' otağından yaradan tərəfindən çıxarıldınız.` });
+             opponentSocket.leave(roomId);
+             if(opponentUserInfo) opponentUserInfo.currentRoom = null;
+             opponentSocket.disconnect(true); // Bağlantını kəs (bu, handleDisconnectOrLeave-i işə salacaq)
+         } else {
+              console.warn(`[kick_opponent v12] Kicked opponent's socket (${opponentSocketId}) not found. Manually cleaning up.`);
+              // Əgər socket yoxdursa, deməli onsuz da disconnect olub.
+              // handleDisconnectOrLeave onsuz da işləmiş olmalı idi.
+              // Sadəcə users[] və players[]-dan təmizləyək.
+              removePlayerFromRoomArray(room, opponentSocketId);
+              removeUserGlobally(opponentSocketId);
+              // GameState-i də təmizləyək (əgər opponentUserInfo varsa)
+               if(room.gameState && opponentUserInfo) {
+                    const { playerState: kickedPlayerState } = findPlayerStates(room.gameState, opponentUserInfo.userId);
+                    if(kickedPlayerState) {
+                        Object.assign(kickedPlayerState, { socketId: null, userId: null, username: null, isDisconnected: false, disconnectTime: null, symbol: null, roll: null });
+                        // Yaradanı gözləməyə qaytar
+                        room.gameState.gamePhase = 'waiting';
+                        room.gameState.statusMessage = "Rəqib çıxarıldı. Yeni rəqib gözlənilir...";
+                        emitGameStateUpdate(roomId, 'opponent_kicked_socket_not_found');
+                        broadcastRoomList(); // Lobbini yenilə
+                    }
+               }
+         }
+         socket.emit('info_message', { message: `'${opponentName}' otaqdan çıxarıldı.` });
+         // broadcastRoomList və emitGameStateUpdate ya disconnect handler-i, ya da yuxarıdakı else bloku tərəfindən edilir.
+    }); // --- 'kick_opponent' sonu ---
+
+
+   // === Növbəti hissədə (Part 6) oyun məntiqi hadisələri gələcək ===
+
+console.log('--- Part 5/7 Tamamlandı (io.on("connection") bloku hələ də açıqdır) ---');
+// ==============================
+// ===== PART 5/7 SONU ==========
+// ==============================
+// =====================================================================
+    // ===== Part 6/7: Socket.IO Game Logic Handlers =====================
+    // =====================================================================
+    // Bu kod io.on('connection', (socket) => { ... }); bloku içərisindədir!
+
+   // io.on('connection', (socket) => { içində
+
+    // 2. Mövcud otağa qoşulma / Hazır olma hadisəsi (Tam Funksiya v12 - Null Socket Check)
+    socket.on('player_ready_in_room', (data) => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        if (!data || !data.roomId || !data.userId || !data.username) { /* ... xəta ... */ }
+        const roomId = data.roomId; const userId = data.userId; const username = data.username; const room = rooms[roomId];
+        if (!currentUserSocketInfo || currentUserSocketInfo.userId !== userId) { /* ... users[] yeniləmə ... */ } else { currentUserSocketInfo.currentRoom = roomId; }
+
+        console.log(`[Socket Event 5.7 - player_ready_in_room v12] Hadisə alındı: User=${username}, RoomID=${roomId}`);
+        if (!room) { return socket.emit('force_redirect_lobby', { message: "Otaq tapılmadı." }); }
+        if (!room.gameState) { /* ... xəta, bərpa cəhdi ... */ }
+        const gameState = room.gameState;
+        if (!socket.rooms.has(roomId)) { socket.join(roomId); }
+
+        let playerSlot = null; let playerState = null; let needsUpdateEmit = false;
+        if (gameState.player1?.userId === userId) { playerSlot = 1; playerState = gameState.player1; }
+        else if (gameState.player2?.userId === userId) { playerSlot = 2; playerState = gameState.player2; }
+        else { playerSlot = null; playerState = null; }
+        let opponentState = (playerSlot === 1) ? gameState.player2 : gameState.player1;
+
+        // --- Qoşulma/Qayıtma Növünü Təyin Et ---
+
+        // ---- YENİ ŞƏRT ƏLAVƏ EDİLDİ: playerState.socketId === null ----
+        // Oyunçu tapılıb, disconnect olub VƏ socket ID-si null-dırsa (yəni disconnect emal olunub)
+        if (playerState && playerState.isDisconnected && playerState.socketId === null) {
+            // --- A: Yenidən Qoşulan (Düzgün Hal) ---
+            console.log(`[player_ready v12] Reconnecting User (socketId was null): ${username} (Slot ${playerSlot})`);
+            // ... (Reconnect məntiqi: timer sil, state yenilə, room.players yenilə, fazanı təyin et - əvvəlki v11 kimi) ...
+             if (room.disconnectTimers && room.disconnectTimers[userId]) { clearTimeout(room.disconnectTimers[userId]); delete room.disconnectTimers[userId]; }
+             playerState.socketId = socketId; playerState.isDisconnected = false; playerState.disconnectTime = null; playerState.username = username;
+             room.players = room.players.filter(id => users[id]?.userId !== userId);
+             if (!room.players.includes(socketId)) { room.players.push(socketId); }
+             console.log(`[player_ready v12] Updated room.players: [${room.players.join(', ')}]`);
+             needsUpdateEmit = true; broadcastRoomList();
+             // Reconnect Davranışı: Oyun qaldığı yerdən davam
+             if (opponentState?.socketId && !opponentState.isDisconnected) {
+                  console.log(`[player_ready v12] Opponent active. CONTINUING game from phase: ${gameState.gamePhase}.`);
+                  const currentTurnPlayerState = (gameState.currentPlayerSymbol === playerState.symbol) ? playerState : opponentState;
+                  gameState.statusMessage = `${username} oyuna qayıtdı. Sıra: ${currentTurnPlayerState?.username || gameState.currentPlayerSymbol || '?'}`;
+             } else {
+                  console.log(`[player_ready v12] Opponent not active. Reverting to waiting phase.`);
+                  gameState.gamePhase = 'waiting'; gameState.statusMessage = "Rəqib gözlənilir...";
+             }
+
+        } else if (!playerState && room.players.filter(id => users[id] && !users[id]?.isDisconnected).length < 2) {
+            // --- B: Yeni Qoşulan İkinci Oyunçu ---
+            // ... (Əvvəlki v11 kimi - boş slotu tap, əlavə et, zər fazasına keç) ...
+             let targetSlot = null; let targetSlotNum = 0;
+             if (!gameState.player1?.userId) { targetSlot = gameState.player1; targetSlotNum = 1;}
+             else if (!gameState.player2?.userId) { targetSlot = gameState.player2; targetSlotNum = 2;}
+             if (targetSlot) {
+                 console.log(`[player_ready v12] New player ${username} joining as P${targetSlotNum}`);
+                 room.players = room.players.filter(id => users[id]?.userId !== userId);
+                 if (!room.players.includes(socketId)) { room.players.push(socketId); }
+                 console.log(`[player_ready v12] Updated room.players: [${room.players.join(', ')}]`);
+                 targetSlot.socketId = socketId; targetSlot.userId = userId; targetSlot.username = username; targetSlot.isDisconnected = false;
+                 // İki aktiv oyunçu var -> Zər Atma
+                 gameState.gamePhase = 'dice_roll'; gameState.statusMessage = "Oyunçular zər atır...";
+                 if (gameState.player1) gameState.player1.roll = null; if (gameState.player2) gameState.player2.roll = null;
+                 needsUpdateEmit = true; broadcastRoomList();
+             } else { console.warn(`[player_ready v12] No empty slot found.`); needsUpdateEmit = true; }
+
+        // ---- PROBLEMİN BAŞ VERDİYİ BLOKU YENİLƏ ----
+        } else if (playerState && playerState.socketId !== socketId && !playerState.isDisconnected) {
+            // D: Eyni User, Fərqli AKTİV Socket
+             console.warn(`[player_ready v12] User ${username} already actively connected with socket (${playerState.socketId}). New socket ${socketId} trying to connect.`);
+             // Köhnə bağlantını saxlamaq əvəzinə, köhnəni kəsib yenini qəbul edək?
+             // Bu, "başqa cihazdan giriş" problemini həll edə bilər.
+             const oldSocketId = playerState.socketId;
+             const oldSocketInstance = io.sockets.sockets.get(oldSocketId);
+             if (oldSocketInstance) {
+                  console.log(`[player_ready v12] Disconnecting old socket ${oldSocketId}...`);
+                  oldSocketInstance.emit('force_disconnect', { message: 'Bu hesabla başqa yerdən qoşuldunuz.' }); // Köhnəyə xəbər ver
+                  oldSocketInstance.disconnect(true);
+             } else {
+                   console.log(`[player_ready v12] Old socket ${oldSocketId} not found, maybe already disconnected.`);
+             }
+             // İndi yeni socketi qəbul et
+             console.log(`[player_ready v12 DEBUG] Accepting NEW socket ${socketId} for user ${username}.`); // <<< YENI LOG
+             playerState.socketId = socketId; 
+             playerState.socketId = socketId; // Socket ID-ni yenilə
+             playerState.isDisconnected = false; // Aktiv et
+             playerState.username = username; // Adı yenilə (hər ehtimala qarşı)
+             // room.players-i yenilə
+             room.players = room.players.filter(id => id !== oldSocketId); // Köhnəni sil
+             if (!room.players.includes(socketId)) { room.players.push(socketId); } // Yenini əlavə et
+             console.log(`[player_ready v12] Accepted new socket ${socketId} for user ${username}. Updated room.players: [${room.players.join(', ')}]`);
+             needsUpdateEmit = true; // Yeni vəziyyəti göndər
+
+        } else if (playerState && playerState.socketId === socketId && !playerState.isDisconnected) {
+            // C: Artıq Qoşulu Olan (Problem yoxdur)
+             console.log(`[player_ready v12] Player ${username} is already connected and active.`);
+             needsUpdateEmit = true;
+        } else {
+            // E: Digər Hallar (Otaq dolu və bu user state-də yoxdur?)
+             console.log(`[player_ready v12] Player ${username} state: Room full or undefined state. Sending current state.`);
+             needsUpdateEmit = true;
+        }
+        // ---- BLOKLARIN SONU ----
+
+        // Adları yenilə
+        if (gameState.player1?.socketId && users[gameState.player1.socketId]) gameState.player1.username = users[gameState.player1.socketId].username;
+        if (gameState.player2?.socketId && users[gameState.player2.socketId]) gameState.player2.username = users[gameState.player2.socketId].username;
+
+        if (needsUpdateEmit) { emitGameStateUpdate(roomId, 'player_ready_or_reconnected'); }
+        socket.emit('room_info', { name: room.name, boardSize: room.boardSize, creatorUsername: room.creatorUsername });
+
+    }); // --- 'player_ready_in_room' sonu ---
+
+   // --- Zər atma nəticəsi (v11 - Gecikmə ilə) ---
+    socket.on('dice_roll_result', (data) => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) { return socket.emit('game_error', { message: 'İstifadəçi məlumatı tapılmadı.' }); }
+        const roomId = currentUserSocketInfo.currentRoom;
+        if (!roomId || !rooms[roomId]?.gameState) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
+        const state = rooms[roomId].gameState;
+        if (state.gamePhase !== 'dice_roll' || state.isGameOver) return socket.emit('game_error', { message: 'Zər atmaq üçün uyğun mərhələ deyil.' });
+        if (!data || typeof data.roll !== 'number' || data.roll < 1 || data.roll > 6) return socket.emit('game_error', { message: 'Keçərsiz zər nəticəsi.' });
+        console.log(`[Socket Event 6.2 - dice_roll_result v11] Hadisə alındı: User=${user.nickname}, Roll=${data.roll}`);
+
+        let playerState = null; let opponentState = null;
+        if (socketId === state.player1?.socketId && !state.player1.isDisconnected) { playerState = state.player1; opponentState = state.player2; }
+        else if (socketId === state.player2?.socketId && !state.player2.isDisconnected) { playerState = state.player2; opponentState = state.player1; }
+        else return socket.emit('game_error', { message: 'Siz bu oyunda aktiv oyunçu deyilsiniz.' });
+        if (playerState.roll !== null && !state.statusMessage?.includes("Bərabərlik!")) { return socket.emit('game_error', { message: 'Siz artıq zər atmısınız.' }); }
+        playerState.roll = data.roll;
+
+        const p1_roll = state.player1?.roll; const p2_roll = state.player2?.roll;
+
+        if (p1_roll !== null && p2_roll !== null) { // Hər ikisi atıb
+            let winnerState = null; let loserState = null; let diceWinnerSocketId = null;
+            if (p1_roll > p2_roll) { winnerState = state.player1; loserState = state.player2; diceWinnerSocketId = winnerState.socketId; }
+            else if (p2_roll > p1_roll) { winnerState = state.player2; loserState = state.player1; diceWinnerSocketId = winnerState.socketId; }
+
+            if (winnerState) { // Qalib var
+                state.diceWinnerSocketId = diceWinnerSocketId; state.symbolPickerSocketId = diceWinnerSocketId;
+                state.statusMessage = `${winnerState.username || '?'} yüksək atdı (${winnerState.roll} vs ${loserState.roll})! Simvol seçəcək...`;
+                console.log(`[dice_roll_result v11] Dice winner: ${winnerState.username}. Emitting intermediate state...`);
+                emitGameStateUpdate(roomId, 'dice_results_determined');
+                setTimeout(() => { // Simvol seçmə fazasına gecikmə ilə keç
+                    const currentRoom = rooms[roomId];
+                    if (currentRoom?.gameState?.gamePhase === 'dice_roll' && currentRoom.gameState.diceWinnerSocketId === diceWinnerSocketId) {
+                        currentRoom.gameState.gamePhase = 'symbol_select';
+                        currentRoom.gameState.statusMessage = `${winnerState.username || '?'} simvol seçir...`;
+                        console.log(`[dice_roll_result v11] Timeout finished. Switching to symbol_select.`);
+                        emitGameStateUpdate(roomId, 'dice_roll_timeout_finished');
+                    }
+                }, 2500); // 2.5 saniyə
+            } else { // Bərabərlik
+                state.diceWinnerSocketId = null; state.symbolPickerSocketId = null;
+                if(state.player1) state.player1.roll = null; if(state.player2) state.player2.roll = null;
+                state.gamePhase = 'dice_roll'; state.statusMessage = "Bərabərlik! Zərlər təkrar atılır...";
+                console.log(`[dice_roll_result v11] Dice tie.`);
+                emitGameStateUpdate(roomId, 'dice_results_tie');
+            }
+        } else { // Biri gözlənilir
+             const opponentUsername = (opponentState?.socketId && !opponentState.isDisconnected) ? opponentState.username : "Rəqib";
+             state.statusMessage = `${opponentUsername}-in zər atması gözlənilir...`;
+             console.log(`[dice_roll_result v11] One dice result received.`);
+             emitGameStateUpdate(roomId, 'one_dice_result_received');
+        }
+    }); // --- 'dice_roll_result' sonu ---
+
+
+   // --- Simvol seçimi (v11 - Gecikmə ilə) ---
+    socket.on('symbol_choice', (data) => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) { return socket.emit('game_error', { message: 'İstifadəçi məlumatı tapılmadı.' }); }
+        const roomId = currentUserSocketInfo.currentRoom;
+        if (!roomId || !rooms[roomId]?.gameState) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
+        const state = rooms[roomId].gameState;
+        if (state.gamePhase !== 'symbol_select' || state.isGameOver || socketId !== state.symbolPickerSocketId) { return socket.emit('game_error', { message: 'Simvol seçimi üçün uyğun deyil.' }); }
+        if (!data || (data.symbol !== 'X' && data.symbol !== 'O')) return socket.emit('game_error', { message: 'Keçərsiz simvol seçimi.' });
+        console.log(`[Socket Event 6.3 - symbol_choice v11] Hadisə alındı: User=${user.nickname}, Symbol=${data.symbol}`);
+
+        const chosenSymbol = data.symbol; const opponentSymbol = (chosenSymbol === 'X') ? 'O' : 'X';
+        let pickerState = null; let opponentState = null;
+        if (socketId === state.player1?.socketId) { pickerState = state.player1; opponentState = state.player2; }
+        else if (socketId === state.player2?.socketId) { pickerState = state.player2; opponentState = state.player1; }
+        else { return socket.emit('game_error', { message: 'Simvol seçən tapılmadı.' }); }
+        if(pickerState) pickerState.symbol = chosenSymbol; if(opponentState) opponentState.symbol = opponentSymbol;
+
+        // Oyun başlamazdan əvvəl mesajı göstər
+        state.symbolPickerSocketId = null; // Seçim edildi
+        state.statusMessage = `${pickerState.username || '?'} ${chosenSymbol} seçdi. ${opponentState.username || '?'} ${opponentSymbol} ilə oynayacaq.`;
+        console.log(`[symbol_choice v11] Symbols assigned. Emitting intermediate state...`);
+        emitGameStateUpdate(roomId, 'symbol_chosen_show_result');
+
+        setTimeout(() => { // Oyun fazasına gecikmə ilə keç
+            const currentRoom = rooms[roomId];
+            if (currentRoom?.gameState?.gamePhase === 'symbol_select' && currentRoom.gameState.symbolPickerSocketId === null) {
+                 currentRoom.gameState.gamePhase = 'playing';
+                 currentRoom.gameState.currentPlayerSymbol = chosenSymbol; // Seçən başlayır
+                 currentRoom.gameState.lastMoveTime = Date.now();
+                 const currentPlayerUsername = pickerState.username;
+                 currentRoom.gameState.statusMessage = `Oyun başladı! Sıra: ${currentPlayerUsername || chosenSymbol}`;
+                 console.log(`[symbol_choice v11] Timeout finished. Switching to playing phase.`);
+                 emitGameStateUpdate(roomId, 'symbol_choice_timeout_finished');
+            }
+        }, 2000); // 2 saniyə
+    }); // --- 'symbol_choice' sonu ---
+
+
+   // --- Oyunçu hərəkət etdikdə (v12 - Robust Info Fetch) ---
+    socket.on('make_move', (data) => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) { return socket.emit('invalid_move', { message: 'İstifadəçi məlumatı tapılmadı.' }); }
+        const roomId = currentUserSocketInfo.currentRoom;
+        if (!roomId || !rooms[roomId]?.gameState) { return socket.emit('invalid_move', { message: 'Oyun tapılmadı.' }); }
+        const room = rooms[roomId]; const state = room.gameState;
+
+        // Validasiya
+        if (state.gamePhase !== 'playing' || state.isGameOver) { return socket.emit('invalid_move', { message: 'Hərəkət üçün uyğun mərhələ deyil.' }); }
+        let playerState = null;
+        if (socketId === state.player1?.socketId && !state.player1.isDisconnected) playerState = state.player1;
+        else if (socketId === state.player2?.socketId && !state.player2.isDisconnected) playerState = state.player2;
+        if (!playerState || !playerState.symbol || state.currentPlayerSymbol !== playerState.symbol) { return socket.emit('invalid_move', { message: 'Sıra sizdə deyil.' }); }
+        const index = data?.index;
+        if (typeof index !== 'number' || index < 0 || index >= state.board.length || state.board[index] !== '') { return socket.emit('invalid_move', { message: 'Keçərsiz xana seçimi.' }); }
+
+        console.log(`[Socket Event 6.1 - make_move v12] Hadisə alındı: User=${user.nickname}, Index=${index}`);
+        const moveResult = handleMakeMoveServer(roomId, socketId, index); // Yardımçı funksiya (Part 2-də təyin edilib)
+        if (moveResult) { emitGameStateUpdate(roomId, 'make_move'); }
+        else { socket.emit('invalid_move', { message: 'Hərəkət qeydə alınmadı.' }); }
+    }); // --- 'make_move' sonu ---
+
+
+   // --- Yenidən başlatma təklifi (v12 - Robust Info Fetch) ---
+    socket.on('request_restart', () => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) { return socket.emit('game_error', { message: 'İstifadəçi məlumatı tapılmadı.' }); }
+        const roomId = currentUserSocketInfo.currentRoom;
+        if (!roomId || !rooms[roomId]?.gameState) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
+        const room = rooms[roomId]; const state = room.gameState;
+
+        const player1Active = state.player1?.socketId && !state.player1.isDisconnected;
+        const player2Active = state.player2?.socketId && !state.player2.isDisconnected;
+        if (state.gamePhase !== 'game_over' || !player1Active || !player2Active) { return socket.emit('game_error', { message: 'Yenidən başlatma təklifi üçün uyğun deyil.' }); }
+        if (state.restartRequestedBy && state.restartRequestedBy !== socketId) { return socket.emit('info_message', { message: 'Artıq başqa bir təklif var.' }); }
+        if (state.restartRequestedBy === socketId) { return socket.emit('info_message', { message: 'Təklifiniz göndərilib.' }); }
+
+        console.log(`[Socket Event 6.4 - request_restart v12] Hadisə alındı: User=${user.nickname}, RoomID=${roomId}`);
+        state.restartRequestedBy = socketId; state.restartAcceptedBy = new Set([socketId]);
+
+        const opponentSocketId = (socketId === state.player1.socketId) ? state.player2.socketId : state.player1.socketId;
+        const opponentSocket = opponentSocketId ? io.sockets.sockets.get(opponentSocketId) : null;
+        if (opponentSocket) {
+            opponentSocket.emit('restart_requested', { username: user.nickname });
+            socket.emit('info_message', { message: 'Təklif göndərildi.' });
+            state.statusMessage = `${user.nickname} yenidən başlatmağı təklif edir...`;
+            emitGameStateUpdate(roomId, 'restart_requested');
+        } else { state.restartRequestedBy = null; state.restartAcceptedBy = new Set(); socket.emit('game_error', { message: 'Rəqib tapılmadı.' }); }
+    }); // --- 'request_restart' sonu ---
+
+
+   // --- Yenidən başlatma təklifini qəbul etmə (v12 - Robust Info Fetch + Dice Roll Fix) ---
+    socket.on('accept_restart', () => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) { return socket.emit('game_error', { message: 'İstifadəçi məlumatı tapılmadı.' }); }
+        const roomId = currentUserSocketInfo.currentRoom;
+        if (!roomId || !rooms[roomId]?.gameState) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
+        const room = rooms[roomId]; const state = room.gameState;
+
+        if (state.gamePhase !== 'game_over' || !state.restartRequestedBy || state.restartRequestedBy === socketId) { return socket.emit('game_error', { message: 'Təklifi qəbul etmək üçün uyğun deyil.' }); }
+        const player1Active = state.player1?.socketId && !state.player1.isDisconnected;
+        const player2Active = state.player2?.socketId && !state.player2.isDisconnected;
+        if (!player1Active || !player2Active) { state.restartRequestedBy = null; state.restartAcceptedBy = new Set(); emitGameStateUpdate(roomId, 'restart_cancelled_opponent_left'); return socket.emit('game_error', { message: 'Rəqib ayrılıb.' }); }
+
+        console.log(`[Socket Event 6.5 - accept_restart v12] Hadisə alındı: User=${user.nickname}, RoomID=${roomId}`);
+        state.restartAcceptedBy.add(socketId);
+
+        if (state.restartAcceptedBy.size === 2) {
+            console.log(`[accept_restart v12] Restart qəbul edildi. Oyun ${roomId} sıfırlanır...`);
+            const newGameState = initializeGameState(room); // Sıfırla ('waiting' olacaq)
+            if(newGameState){
+                 newGameState.gamePhase = 'dice_roll'; // Dərhal zər atmağa keç
+                 newGameState.statusMessage = "Oyunçular zər atır...";
+                 emitGameStateUpdate(roomId, 'restart_accepted');
+            } else { /* ... xəta ... */ }
+        }
+    }); // --- 'accept_restart' sonu ---
+
+
+   // --- Yenidən başlatma təklifini rədd etmə (v12 - Robust Info Fetch) ---
+    socket.on('decline_restart', () => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) { return socket.emit('game_error', { message: 'İstifadəçi məlumatı tapılmadı.' }); }
+        const roomId = currentUserSocketInfo.currentRoom;
+        if (!roomId || !rooms[roomId]?.gameState) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
+        const room = rooms[roomId]; const state = room.gameState;
+
+        if (state.gamePhase !== 'game_over' || !state.restartRequestedBy || state.restartRequestedBy === socketId) { return socket.emit('game_error', { message: 'Təklifi rədd etmək üçün uyğun deyil.' }); }
+
+        console.log(`[Socket Event 6.6 - decline_restart v12] Hadisə alındı: User=${user.nickname}, RoomID=${roomId}`);
+        const requesterSocketId = state.restartRequestedBy;
+        state.restartRequestedBy = null; state.restartAcceptedBy = new Set();
+
+        // Statusu əvvəlki vəziyyətə qaytar
+        if (state.winnerSymbol === 'draw') { state.statusMessage = "Oyun Bərabərə!"; }
+        else if (state.winnerSymbol) { const winnerState = (state.player1?.symbol === state.winnerSymbol) ? state.player1 : state.player2; state.statusMessage = `${winnerState?.username || state.winnerSymbol} Qazandı!`; }
+        else { state.statusMessage = "Oyun Bitdi"; }
+
+        // Tərəflərə bildir
+        const requesterSocket = io.sockets.sockets.get(requesterSocketId);
+        if (requesterSocket) { requesterSocket.emit('info_message', { message: `${user.nickname} təklifi rədd etdi.` }); }
+        socket.emit('info_message', { message: 'Təklifi rədd etdiniz.' });
+        emitGameStateUpdate(roomId, 'restart_declined'); // State yeniləndi
+    }); // --- 'decline_restart' sonu ---
+
+
+   // --- Oyun Məntiqi üçün Yardımçı Funksiya ---
+   // Qeyd: Bu funksiyanın tərifi io.on('connection',...) blokunun xaricində olmalıdır (Part 2 və ya 7-də)
+   // function handleMakeMoveServer(roomId, socketId, index) { ... }
+/**
+ * Server tərəfində hərəkəti emal edir, lövhəni yeniləyir, qalibi yoxlayır və sıranı dəyişir.
+ * @param {string} roomId - Hərəkətin edildiyi otaq ID-si.
+ * @param {string} socketId - Hərəkəti edən oyunçunun socket ID-si.
+ * @param {number} index - Lövhədəki hərəkət indeksi.
+ * @returns {boolean} - Hərəkət uğurlu oldusa true, əks halda false.
+ */
+function handleMakeMoveServer(roomId, socketId, index) {
+    const room = rooms[roomId];
+    // Keçərsiz vəziyyət yoxlaması (Otaq, GameState, Oyun fazası, Oyun bitməsi)
+    if (!room || !room.gameState || room.gameState.isGameOver || room.gameState.gamePhase !== 'playing') {
+        console.error(`[handleMakeMoveServer] Keçərsiz vəziyyət: Room=${!!room}, State=${!!room?.gameState}, Over=${room?.gameState?.isGameOver}, Phase=${room?.gameState?.gamePhase}`);
+        return false; // Xəta baş verdi, hərəkət edilmədi
+    }
+
+    const state = room.gameState;
+    // Hərəkət edən oyunçunun state-ini tap (aktiv olduğunu yoxla)
+    const playerState = (socketId === state.player1?.socketId && !state.player1.isDisconnected) ? state.player1
+                     : (socketId === state.player2?.socketId && !state.player2.isDisconnected) ? state.player2
+                     : null;
+
+    // Keçərsiz hərəkət yoxlamaları (Oyunçu tapılmadı, Sıra onda deyil, Xana dolu)
+    if (!playerState || !playerState.symbol || state.currentPlayerSymbol !== playerState.symbol || index < 0 || index >= state.board.length || state.board[index] !== '') {
+         console.error(`[handleMakeMoveServer] Keçərsiz hərəkət cəhdi: Player=${playerState?.username}, Symbol=${playerState?.symbol}, Current=${state.currentPlayerSymbol}, Index=${index}, BoardVal=${state.board?.[index]}`);
+         return false; // Hərəkət keçərsizdir
+    }
+
+    // Hərəkəti et
+    console.log(`[handleMakeMoveServer] Making move for ${playerState.username} at index ${index}`);
+    state.board[index] = playerState.symbol;
+    state.lastMoveTime = Date.now(); // Son hərəkət vaxtını yenilə (hərəkətsizlik taymeri üçün lazım olacaq)
+
+    // Qalibiyyət və ya bərabərlik yoxlaması
+    if (checkWinServer(room, playerState.symbol)) { // checkWinServer Part 2-də təyin edilib
+        state.isGameOver = true;
+        state.winnerSymbol = playerState.symbol;
+        state.gamePhase = 'game_over';
+        state.statusMessage = `${playerState.username || playerState.symbol} Qazandı!`;
+        state.restartRequestedBy = null; state.restartAcceptedBy = new Set(); // Restartı sıfırla
+        console.log(`[handleMakeMoveServer] Oyun bitdi. Qalib: ${playerState.username} (${playerState.symbol}) Room: ${roomId}`);
+    } else if (!state.board.includes('')) { // Bərabərlik (Boş xana qalmayıbsa)
+        state.isGameOver = true;
+        state.winnerSymbol = 'draw';
+        state.gamePhase = 'game_over';
+        state.statusMessage = "Oyun Bərabərə!";
+        state.restartRequestedBy = null; state.restartAcceptedBy = new Set(); // Restartı sıfırla
+        console.log(`[handleMakeMoveServer] Oyun bərabərə bitdi. Room: ${roomId}`);
+    } else {
+        // Oyun davam edir, sıranı dəyiş
+        switchTurnServer(room); // switchTurnServer Part 2-də təyin edilib
+        const nextPlayerState = (state.currentPlayerSymbol === state.player1?.symbol) ? state.player1 : state.player2;
+        // Növbəti oyunçunun aktiv olub olmadığını yoxla (disconnect ola bilər)
+        const nextPlayerActive = nextPlayerState?.socketId && !nextPlayerState.isDisconnected;
+        state.statusMessage = nextPlayerActive
+             ? `Sıra: ${nextPlayerState.username || state.currentPlayerSymbol}`
+             : `Sıra: ${nextPlayerState?.username || state.currentPlayerSymbol || '?'} (Gözlənilir...)`; // Əgər rəqib disconnect olubsa
+    }
+    return true; // Hərəkət uğurlu oldu
+}
+
+console.log('--- Part 6/7 Tamamlandı (io.on("connection") bloku hələ də açıqdır) ---');
+// ==============================
+// ===== PART 6/7 SONU ==========
+// ==============================
+
+// === Növbəti hissə (Part 7) bu blokun içinə əlavə olunacaq ===
+// =============================================================================
+    // ===== Part 7/7: Socket.IO Disconnect/Leave Handling & Server Start/Stop =====
+    // =============================================================================
+    // Bu kod io.on('connection', (socket) => { ... }); bloku içərisindədir!
+
+    // --- Otaqdan aktiv ayrılma (v3 - Broadcast Sonda, v12 Robust Info) ---
+    socket.on('leave_room', () => {
+        const socketId = socket.id;
+        const currentUserSocketInfo = users[socketId];
+        // <<< Robust Info Fetch >>>
+        const user = currentUserSocketInfo ? { id: currentUserSocketInfo.userId, nickname: currentUserSocketInfo.username } : null;
+        if (!user || !currentUserSocketInfo) { console.error(`[leave_room v12] Kritik xəta: User info yoxdur. Socket: ${socketId}`); socket.disconnect(true); return; }
+        const username = user.nickname; const userId = user.userId; const roomId = currentUserSocketInfo.currentRoom;
+        // <<< Robust Info Fetch Sonu >>>
+
+        console.log(`[Socket Event 5.3 - leave_room V3] Explicit leave request: User=${username}, RoomID=${roomId}`);
+
+        // Qlobal users-dən sil
+        removeUserGlobally(socketId);
+
+        if (roomId && rooms[roomId]) {
+            const room = rooms[roomId];
+            // room.players-dən sil (broadcast etmir)
+            removePlayerFromRoomArray(room, socketId);
+
+            let gameStateNeedsUpdate = false;
+            if (room.gameState) {
+                const { playerState, opponentState } = findPlayerStates(room.gameState, userId);
+                if (playerState) { // Oyunçu state-də idisə
+                    console.log(`[leave_room v3] Permanently removing ${username} from gameState.`);
+                    // Slotu tamamilə sıfırla
+                    Object.assign(playerState, { socketId: null, userId: null, username: null, isDisconnected: false, disconnectTime: null, symbol: null, roll: null });
+                    gameStateNeedsUpdate = true;
+                    if (room.gameState.restartRequestedBy) { room.gameState.restartRequestedBy = null; room.gameState.restartAcceptedBy = new Set(); }
+                    // Rəqibə bildir və gözləməyə qaytar
+                    const opponentSocket = opponentState?.socketId ? io.sockets.sockets.get(opponentState.socketId) : null;
+                    if (opponentSocket) {
+                        opponentSocket.emit('opponent_left_game', { username: username, reconnecting: false });
+                        if (room.gameState.gamePhase !== 'game_over') {
+                            room.gameState.gamePhase = 'waiting'; room.gameState.statusMessage = "Rəqib ayrıldı. Yeni rəqib gözlənilir...";
+                            // Oyun məlumatlarını sıfırla
+                            room.gameState.board = Array(room.gameState.boardSize * room.gameState.boardSize).fill('');
+                            if(room.gameState.player1) { room.gameState.player1.roll = null; room.gameState.player1.symbol = null; }
+                            if(room.gameState.player2) { room.gameState.player2.roll = null; room.gameState.player2.symbol = null; }
+                            room.gameState.currentPlayerSymbol = null; room.gameState.diceWinnerSocketId = null; room.gameState.symbolPickerSocketId = null;
+                            room.gameState.winningCombination = []; room.gameState.isGameOver = false; room.gameState.winnerSymbol = null;
+                        }
+                    }
+                }
+            }
+            handleRoomCleanupAndCreator(room, username); // Otaq vəziyyətini yoxla
+
+            // ---- Broadcast və Emit sonda ----
+            if (gameStateNeedsUpdate && room.gameState && room.players.length > 0) {
+                 emitGameStateUpdate(roomId, 'player_explicit_leave'); // Qalanlara state göndər
+            }
+            console.log(`[DEBUG leave_room] Broadcasting room list after explicit leave from room ${roomId}.`); // <<< YENİ LOG >>>
+            broadcastRoomList(); // Sonra lobbini yenilə
+            // ---- Broadcast və Emit Sonu ----
+        } else {
+            console.log(`[leave_room v3] User ${username} was not in a room.`);
+            broadcastRoomList(); // Ehtiyat üçün lobbini yenilə
+        }
+
+        if(roomId) socket.leave(roomId);
+        if(currentUserSocketInfo) currentUserSocketInfo.currentRoom = null; // users[]-dan otağı təmizlə
+        socket.disconnect(true); // Bağlantını kəs
+    }); // --- 'leave_room' sonu ---
+
+
+   // --- Bağlantı kəsilməsi ---
+    socket.on('disconnect', (reason) => {
+        // user məlumatını users[]-dan götürməyə çalışaq
+        const userInfo = users[socket.id]; // socket.user yerinə
+        console.log(`[Socket Disconnect v12] User: ${userInfo?.username || socket.id} disconnected. Reason: ${reason}`);
+        // Ümumi funksiyanı çağır
+        handleDisconnectOrLeave(socket, reason);
+    }); // --- 'disconnect' sonu ---
+
+
+}); // <<<--- io.on('connection', ...) BLOKU BURADA BAĞLANIR --- <<<
+
+
+// ============================================================================
+// ===== Bağlantı Kəsilmə/Ayrılma üçün Əsas və Yardımçı Funksiyalar =========
+// ============================================================================
+// Qeyd: Bu funksiyalar io.on('connection',...) blokunun XARİCİNDƏ yerləşməlidir.
+
+// io.on('connection',...) BLOKUNUN XARİCİNDƏ
 
 /**
-* Socket bağlantısı kəsildikdə və ya istifadəçi aktiv şəkildə otaqdan ayrıldıqda ('leaveRoom')
-* çağırılan ümumi funksiya. Oyunçunu Redis-dəki otaq qeydlərindən təmizləyir,
-* otağın vəziyyətini yeniləyir və lazım gələrsə boş otağı silir. Sonda lobbi siyahısını yeniləyir.
-* @param {object} socket - Ayrılan və ya bağlantısı kəsilən Socket.IO socket obyekti.
-* @param {object} redisClient - Qoşulmuş Redis klienti (pubClient).
-* @returns {Promise<void>}
-*/
-async function handleDisconnectOrLeave(socket, redisClient) {
- const username = socket.request.session?.username || `Qonaq_${socket.id.substring(0, 5)}`;
- const userId = socket.request.session?.userId;
- const playerSocketKey = `socket:${socket.id}:room`; // Bu socket-in otaq qeydi üçün açar
+ * Bağlantı kəsilməsini idarə edən əsas funksiya (v9 - Update Call Fix)
+ * @param {object} socketInstance - Ayrılan socket obyekti.
+ * @param {string} reason - Ayrılma səbəbi.
+ */
+function handleDisconnectOrLeave(socketInstance, reason = 'disconnect') {
+    const socketId = socketInstance.id;
+    const leavingUserInfo = getUserInfoForDisconnect(socketInstance);
+    if (!leavingUserInfo) { delete users[socketId]; return; }
 
- try {
-   // 1. Oyunçunun hansı otaqda olduğunu Redis-dən öyrənirik
-   const roomId = await redisClient.get(playerSocketKey);
+    const { username, userId, roomId } = leavingUserInfo;
+    console.log(`[handleDisconnectOrLeave v9] Processing: User=${username}, Room=${roomId || 'N/A'}, Reason=${reason}`);
 
-   // Əgər oyunçu həqiqətən bir otaqdadırsa (roomId varsa)
-   if (roomId) {
-     const roomKey = `room:${roomId}`; // Otağın əsas açarı
-     console.log(`🧹 ${username} (Socket: ${socket.id}) "${roomId}" otağından təmizlənir...`);
+    removeUserGlobally(socketId);
 
-     // 2. Oyunçunu Socket.IO otağından çıxarırıq (artıq mesaj almasın deyə)
-     socket.leave(roomId);
+    if (!roomId || !rooms[roomId]) {
+        console.log(`[handleDisconnectOrLeave v9] User ${username} was not in a valid room.`);
+       // broadcastRoomList(); // Otaqda olmasa da user sayı dəyişə bilər, lobbini yenilə
+        return;
+    }
+    const room = rooms[roomId];
+    const playerRemovedFromArray = removePlayerFromRoomArray(room, socketId); // Broadcast etmir
 
-     // 3. Oyunçunu Redis-dəki otaq oyunçuları Set-indən silirik
-     // `sRem` silinən element sayını qaytarır (0 və ya 1)
-     const removedPlayerCountFromSet = await redisClient.sRem(`${roomKey}:players`, socket.id);
+    let gameStateChanged = false;
+    if (room.gameState) {
+        const { playerState, opponentState } = findPlayerStates(room.gameState, userId);
 
-     // 4. Oyunçunun otaq qeydini (socket:id:room) silirik
-     await redisClient.del(playerSocketKey);
-
-     // Əgər oyunçu həqiqətən Set-dən silindisə (yəni əvvəldən orada idisə)
-     if (removedPlayerCountFromSet > 0) {
-         // 5. Otağın oyunçu sayını (playerCount) 1 vahid azaldırıq
-         //    `hIncrBy` mənfi dəyər ilə azaltmaq üçün də istifadə edilə bilər
-         const finalPlayerCount = await redisClient.hIncrBy(roomKey, 'playerCount', -1);
-
-         console.log(`📊 "${roomId}" otağının oyunçu sayı ${finalPlayerCount}-ə endirildi.`);
-
-         // 6. Otağın boş qalıb qalmadığını yoxlayırıq
-         if (finalPlayerCount <= 0) {
-           // Otaq boşdursa, onu tamamilə silirik
-           console.log(`🗑️ Otaq ${roomId} boş qaldı, silinir...`);
-           // Otağın əsas Hash-ını silirik
-           await redisClient.del(roomKey);
-           // Otağın oyunçular Set-ini silirik (artıq boş olmalıdır, amma yenə də silirik)
-           await redisClient.del(`${roomKey}:players`);
-            // Əgər oyun spesifik məlumatlar saxlanılırsa (məsələn, oyunçuların seçimləri) onları da silmək lazımdır
-            const playerSpecificKeys = await redisClient.keys(`room:${roomId}:player:*`);
-            if (playerSpecificKeys.length > 0) {
-               console.log(`🗑️ Silinən ${roomId} otağı üçün ${playerSpecificKeys.length} ədəd oyunçu spesifik məlumat silinir...`);
-               await redisClient.del(playerSpecificKeys);
-            }
-           // Otağı aktiv otaqlar siyahısından ('activeRooms' Set-indən) çıxarırıq
-           await redisClient.sRem('activeRooms', roomKey);
-         } else {
-           // Otaqda hələ də oyunçu(lar) varsa, onlara bu oyunçunun ayrıldığı barədə məlumat veririk
-           console.log(`👤 ${username} otaqdan ayrıldı, ${finalPlayerCount} oyunçu qaldı.`);
-           // io.to(roomId) istifadə edirik ki, mesaj qalan bütün oyunçulara getsin
-           io.to(roomId).emit('playerLeft', { username: username, userId: userId, socketId: socket.id });
-            // Oyun vəziyyətini sıfırlamaq və ya gözləmə moduna keçirmək lazım ola bilər
-            // await redisClient.hSet(roomKey, 'status', 'waiting');
-            // await redisClient.hDel(roomKey, 'board'); // Oyun lövhəsini təmizlə
-            // await redisClient.hDel(roomKey, 'turn'); // Növbəni təmizlə
-         }
-     } else {
-        // Əgər oyunçu Set-dən silinmədisə, bu o deməkdir ki, o, Set-də yox idi.
-        // Bu, bəzən iki dəfə disconnect və ya başqa qeyri-adi vəziyyətlərdə ola bilər.
-        console.log(`⚠️ ${username} (Socket: ${socket.id}) "${roomId}" otağının oyunçu siyahısında tapılmadı, çox güman ki, artıq çıxarılıb.`);
-        // Hər ehtimala qarşı otağın hələ də mövcud olub olmadığını yoxlaya bilərik
-        const roomStillExists = await redisClient.exists(roomKey);
-        // Əgər otaq mövcud deyilsə, amma 'socket:id:room' qeydi var idisə,
-        // 'activeRooms'-dan silindiyindən əmin oluruq.
-        if (!roomStillExists) {
-            console.log(`ℹ️ Otaq ${roomKey} onsuz da silinmiş görünür. 'activeRooms' yoxlanılır...`);
-            await redisClient.sRem('activeRooms', roomKey);
+        // ----- DƏYİŞİKLİK BURADA -----
+        // Explicit leave deyilsə VƏ playerState tapılıbsa, həmişə update-i çağır
+        if (reason !== 'leave_room_request' && playerState) {
+             // updateGameStateOnLeave funksiyası fazaya görə düzgün əməliyyatı seçəcək
+             // (waiting/game_over üçün socketId-ni null edəcək, playing vs. üçün isDisconnected edəcək)
+            gameStateChanged = updateGameStateOnLeave(room, playerState, opponentState, username, userId, reason);
+        } else if (reason !== 'leave_room_request') {
+            console.log(`[handleDisconnectOrLeave v9] Player ${username} not found in gameState for room ${roomId} during disconnect reason: ${reason}.`);
         }
-     }
+         // Explicit leave hallarını 'leave_room' handler-i idarə edir.
+         // ----- DƏYİŞİKLİK SONU -----
+    }
 
-     // 7. Sonda, nə olursa olsun, bütün lobbidəki klientlərə yenilənmiş otaq siyahısını göndəririk
-     await broadcastRoomList(redisClient);
+    handleRoomCleanupAndCreator(room, username);
 
-   } else {
-     // Əgər 'socket:id:room' qeydi yoxdursa, deməli bu socket onsuz da heç bir otaqda deyildi.
-     console.log(`ℹ️ ${username} (Socket: ${socket.id}) heç bir otaqda deyildi.`);
-   }
- } catch (error) {
-   console.error(`❌ Socket ${socket.id} üçün ayrılma/bağlantı kəsilməsi zamanı xəta:`, error);
-   // Xəta baş verdikdə belə otaq siyahısını yeniləməyə çalışırıq
-   try {
-      await broadcastRoomList(redisClient);
-   } catch (broadcastError) {
-      console.error("❌ Ayrılma xətasından sonra otaq siyahısını yayımlayarkən xəta:", broadcastError);
-   }
- }
+    let activePlayerCountInState = 0;
+    if (room.gameState?.player1?.socketId && !room.gameState.player1.isDisconnected) activePlayerCountInState++;
+    if (room.gameState?.player2?.socketId && !room.gameState.player2.isDisconnected) activePlayerCountInState++;
+
+    if (gameStateChanged && room.gameState && activePlayerCountInState > 0) {
+        emitGameStateUpdate(roomId, `player_${reason}_state_update`);
+    }
+    // Lobbini həmişə yenilə (əgər players[] dəyişibsə və ya state dəyişibsə)
+    if (playerRemovedFromArray || gameStateChanged) {
+        console.log(`[DEBUG handleDisconnectOrLeave] Broadcasting room list after disconnect. Room: ${roomId}, Reason: ${reason}`); // <<< YENİ LOG >>>
+        broadcastRoomList();
+    }
 }
-// BU KOD io.on('connection', ...) BLOKUNUN DAXİLİNƏ ƏLAVƏ EDİLMƏLİDİR:
-// (socket.on('disconnect', ...) listener-ından sonra)
 
-  // --- Oyunla bağlı Socket Hadisələri (Redis ilə inteqrasiya edilməlidir) ---
+// --- Yardımçı: User Info Alma ---
+function getUserInfoForDisconnect(socketInstance) {
+   const socketId = socketInstance.id;
+   // Əvvəlcə users[] obyektindən axtar
+   const userInfoFromMap = users[socketId];
+   if (userInfoFromMap) {
+        // console.log(`[getUserInfoForDisconnect] Info found in users map for ${socketId}`);
+        return { ...userInfoFromMap }; // Kopyasını qaytar
+   }
+   // Əgər users[]-da yoxdursa (çox nadir hal), socket.user-ə baxaq
+   const userInfoFromSocket = socketInstance.user;
+   if(userInfoFromSocket && userInfoFromSocket.id && userInfoFromSocket.nickname) {
+       console.warn(`[getUserInfoForDisconnect] Info not in users map, using socket.user for ${socketId}`);
+        // users[]-dakı currentRoom məlumatı itəcək, buna diqqət!
+        return {
+            username: userInfoFromSocket.nickname,
+            userId: userInfoFromSocket.id,
+            roomId: null, // currentRoom məlumatı burada yoxdur!
+            socketId: socketId
+        };
+   }
+   // console.log(`[getUserInfoForDisconnect] No user info found for socket ${socketId}`);
+   return null;
+}
 
-  // Zər atma hadisəsi
-  socket.on('rollDice', async (diceValue) => {
-    // Oyunçunun hansı otaqda olduğunu tapırıq
-    const roomId = await getRoomIdForSocket(pubClient, socket.id);
-    if (!roomId) return; // Otaqda deyilsə heçnə etmirik
+// --- Yardımçı: Qlobal User Silmə ---
+function removeUserGlobally(socketId) {
+   if (users[socketId]) {
+       // console.log(`[Helper Fn] Removing socket ${socketId} from global users object.`);
+       delete users[socketId];
+   }
+}
 
-    console.log(`🎲 ${username} "${roomId}" otağında ${diceValue} zərini atdı.`);
-    // Nəticəni otaqdakı digər oyunçu(lar)a göndəririk
-    // `socket.to(roomId)` göndərən xaric digərlərinə göndərir
-    socket.to(roomId).emit('opponentRolledDice', { userId, username, diceValue });
+// --- Yardımçı: Oyunçunu Otaq Massivindən Silmə (v11 - broadcast çıxarıldı) ---
+function removePlayerFromRoomArray(room, socketId) {
+   const playerIndex = room.players.indexOf(socketId);
+   if (playerIndex > -1) {
+       room.players.splice(playerIndex, 1);
+       console.log(`[Helper Fn v11] Socket ${socketId} removed from room.players for room ${room.id}. Left: ${room.players.length}`);
+       // broadcastRoomList(); // <<<--- SİLİNDİ/ŞƏRHƏ ALINDI ---<<<
+       return true;
+   }
+   return false;
+}
 
-    // GƏLƏCƏKDƏ: Zər nəticələrini Redis-də saxlamaq lazım ola bilər
-    // Məsələn: await pubClient.hSet(`room:${roomId}:player:${socket.id}`, 'dice', diceValue.toString());
-    // Və ya hər iki oyunçunun nəticəsi gəldikdə kimin başlayacağını təyin etmək üçün məntiq.
-  });
+// --- Yardımçı: Player State-ləri Tapma ---
+function findPlayerStates(gameState, userId) {
+   let playerState = null, opponentState = null;
+   if (!gameState || !userId) return { playerState, opponentState };
+   if (gameState.player1?.userId === userId) { playerState = gameState.player1; opponentState = gameState.player2; }
+   else if (gameState.player2?.userId === userId) { playerState = gameState.player2; opponentState = gameState.player1; }
+   return { playerState, opponentState };
+}
 
-  // Simvol seçimi hadisəsi
-  socket.on('symbolChosen', async ({ symbol }) => {
-     const roomId = await getRoomIdForSocket(pubClient, socket.id);
-     if (!roomId) return;
+// --- Yardımçı: Gözlənilməz Ayrılmada GameState Yeniləmə (v9 - Status Fix & Restart Reset) ---
+// io.on('connection',...) BLOKUNUN XARİCİNDƏ
 
-     console.log(` SYM ${username} "${roomId}" otağında '${symbol}' simvolunu seçdi.`);
-     // Seçimi Redis-də bu oyunçu üçün qeyd edirik
-     await pubClient.hSet(`room:${roomId}:player:${socket.id}`, 'symbol', symbol);
-     // Seçimi otaqdakı digər oyunçu(lar)a bildiririk
-     socket.to(roomId).emit('opponentSymbolChosen', { userId, username, symbol });
+/**
+ * Addım 4b: Oyunçunun GÖZLƏNİLMƏZ ayrılmasına görə gameState-i yeniləyir (v10 - Waiting Phase Fix)
+ */
+function updateGameStateOnLeave(room, playerState, opponentState, username, userId, reason) {
+    if (reason === 'leave_room_request') { return false; } // Explicit leave burada idarə olunmur
 
-     // GƏLƏCƏKDƏ: Hər iki oyunçu simvol seçdikdən sonra oyun lövhəsini göstərmək və ilk növbəni təyin etmək.
-     // const playerKeys = await pubClient.keys(`room:${roomId}:player:*`);
-     // if (playerKeys.length === 2) {
-     //    const p1Symbol = await pubClient.hGet(playerKeys[0], 'symbol');
-     //    const p2Symbol = await pubClient.hGet(playerKeys[1], 'symbol');
-     //    if (p1Symbol && p2Symbol) {
-     //       console.log(` SYM Room ${roomId} symbols chosen. Ready to start.`);
-     //       // İlk növbəni Redis-dən oxu/təyin et və klientlərə bildir.
-     //       // const firstTurn = await pubClient.hGet(`room:${roomId}`, 'turn');
-     //       // io.to(roomId).emit('startGameWithTurn', { startingPlayerId: firstTurn });
-     //    }
-     // }
-  });
+    const state = room.gameState;
+    let stateChanged = false;
 
-  // Gediş etmə hadisəsi
-  socket.on('makeMove', async ({ index, symbol }) => {
-     const roomId = await getRoomIdForSocket(pubClient, socket.id);
-     if (!roomId) return;
+    // Restart Təklifini Ləğv Etmə
+    if (state.restartRequestedBy) {
+        console.log(`[Helper Fn Update v10] Disconnect during restart request. Cancelling request.`);
+        state.restartRequestedBy = null; state.restartAcceptedBy = new Set();
+        stateChanged = true;
+    }
 
-     console.log(`♟️ ${username} "${roomId}" otağında ${index} xanasına '${symbol}' ilə gediş etdi.`);
+    // Oyun davam edirsə (playing, dice_roll, symbol_select)
+    if (state.gamePhase !== 'game_over' && state.gamePhase !== 'waiting') {
+        if (!playerState.isDisconnected) { // Yalnız əgər artıq disconnected deyilsə
+            console.log(`[Helper Fn Update v10] Player ${username} UNEXPECTEDLY left during '${state.gamePhase}'. Marking as disconnected.`);
+            playerState.isDisconnected = true; playerState.disconnectTime = Date.now(); playerState.socketId = null;
+            stateChanged = true;
+            const opponentSocket = opponentState?.socketId ? io.sockets.sockets.get(opponentState.socketId) : null;
+            if (opponentSocket) {
+                state.statusMessage = `${username} bağlantısı kəsildi, yenidən qoşulması gözlənilir...`;
+                console.log(`[Helper Fn Update v10] Phase remains '${state.gamePhase}', status updated.`);
+                opponentSocket.emit('opponent_left_game', { username: username, reconnecting: true });
+            } else {
+                console.log(`[Helper Fn Update v10] Opponent also not present. Setting phase to 'waiting'.`);
+                state.gamePhase = 'waiting'; state.statusMessage = 'Rəqib gözlənilir...';
+            }
+            startReconnectTimer(userId, room.id, username);
+        }
+    }
+    // Oyun bitmişdi və ya GÖZLƏMƏ fazası
+    else {
+        // ---- DƏYİŞİKLİK BURADA ----
+        // Waiting fazasında qalıcı silmə etmə, sadəcə socketId-ni null et
+        if (playerState.socketId === socketInstance.id) { // Yalnız ayrılan socket bu oyunçuya aid idisə
+             console.log(`[Helper Fn Update v10] Player ${username} left during '${state.gamePhase}'. Clearing socketId.`);
+             playerState.socketId = null; // Socket ID-ni təmizlə
+             // isDisconnected false qalır, çünki taymer yoxdur
+             // userId və username qalır ki, qayıdanda tanınsın
+             stateChanged = true;
 
-     // ---- Redis ilə Oyun Məntiqi (Əsas Hissə) ----
-     // 1. Gedişin Keçərliliyini Yoxlamaq (Opsional, amma tövsiyə olunur):
-     //    - Növbə həqiqətən bu oyunçudadırmı? (Redis-dən `turn`-u oxu)
-     //    - Seçilmiş xana boşdurmu? (Redis-dən `board`-u oxu)
-     //    - const currentTurn = await pubClient.hGet(`room:${roomId}`, 'turn');
-     //    - if (currentTurn !== socket.id) { /* Xəta: Sənin növbən deyil */ return; }
-     //    - const boardJson = await pubClient.hGet(`room:${roomId}`, 'board');
-     //    - let board = JSON.parse(boardJson || '[]'); // Boşdursa [] olsun
-     //    - if (board[index]) { /* Xəta: Xana doludur */ return; }
+             const opponentSocket = opponentState?.socketId ? io.sockets.sockets.get(opponentState.socketId) : null;
+             if (opponentSocket) {
+                 // Waiting fazasında rəqibə bildirməyə ehtiyac yoxdur? Yoxsa var?
+                 opponentSocket.emit('opponent_left_game', { username: username, reconnecting: false }); // Qalıcı ayrıldı kimi göstərək?
+                 if (state.gamePhase === 'waiting') { state.statusMessage = "Rəqib ayrıldı. Yeni rəqib gözlənilir..."; }
+             }
+        }
+        // ---- DƏYİŞİKLİK SONU ----
+    }
+    return stateChanged;
+}
+// --- Yardımçı: Otaq Təmizləmə/Yaradan Yoxlama ---
+function handleRoomCleanupAndCreator(room, leavingUsername) {
+   // Aktiv oyunçu sayını hesabla
+   let activePlayerCountInState = 0;
+   if (room.gameState?.player1?.socketId && !room.gameState.player1.isDisconnected) activePlayerCountInState++;
+   if (room.gameState?.player2?.socketId && !room.gameState.player2.isDisconnected) activePlayerCountInState++;
 
-     // 2. Gedişi Redis-dəki Lövhədə Qeyd Etmək:
-     //    - const boardJson = await pubClient.hGet(`room:${roomId}`, 'board');
-     //    - let board = JSON.parse(boardJson || JSON.stringify(Array(9).fill(null))); // Boşdursa yarat
-     //    - board[index] = symbol;
-     //    - await pubClient.hSet(`room:${roomId}`, 'board', JSON.stringify(board));
-     //    - console.log(`Board updated for ${roomId}: ${JSON.stringify(board)}`);
+   // Otaq tamamilə boşdursa (həm players[] həm də aktiv state)
+   if (activePlayerCountInState === 0 && room.players.length === 0) {
+       if (!roomCleanupTimers[room.id]) { // Yalnız əgər timer artıq qurulmayıbsa
+           startRoomCleanupTimer(room.id, room.name); // Yardımçı funksiya
+       }
+   }
+   // Yaradan ayrılıbsa və 1 nəfər aktiv qalıbsa
+   else if (activePlayerCountInState === 1 && room.creatorUsername === leavingUsername && room.gameState) {
+       const remainingPlayerState = (room.gameState.player1?.socketId && !room.gameState.player1.isDisconnected) ? room.gameState.player1 : room.gameState.player2;
+       if (remainingPlayerState && remainingPlayerState.username) {
+           room.creatorUsername = remainingPlayerState.username; // Yaradanı dəyişdir
+           console.log(`[Helper Fn] Otaq ${room.id} yaradanı '${room.creatorUsername}'-ə dəyişdi.`);
+           broadcastRoomList(); // Yaradan dəyişdiyi üçün lobbini yenilə
+       }
+   }
+}
 
-     // 3. Gedişi Otaqdakı Digər Oyunçu(lar)a Göndərmək:
-     socket.to(roomId).emit('moveMade', { index, symbol, playerId: socket.id });
+// --- Yardımçı: Yenidən Qoşulma Taymeri ---
+function startReconnectTimer(disconnectedUserId, roomId, username) {
+   const room = rooms[roomId];
+   if (!room) return;
+   if (!room.disconnectTimers) room.disconnectTimers = {}; // Obyekti yarat (əgər yoxdursa)
 
-     // 4. Oyunun Bitmə Vəziyyətini Yoxlamaq (Qalibiyyət və ya Heç-heçə):
-     //    - Bu yoxlamanı Redis-dən aldığınız `board` üzərində etməlisiniz.
-     //    - function checkWin(board, symbol) { /* ... Tic Tac Toe qaydaları ... */ }
-     //    - function checkDraw(board) { /* ... Bütün xanalar doludurmu? ... */ }
-     //    - const winner = checkWin(board, symbol);
-     //    - const draw = !winner && checkDraw(board);
+   // Köhnə taymeri ləğv et (hər ehtimala qarşı)
+   if (room.disconnectTimers[disconnectedUserId]) {
+       clearTimeout(room.disconnectTimers[disconnectedUserId]);
+       console.log(`[Reconnect Timer] Cleared existing timer for User ${username} (ID: ${disconnectedUserId})`);
+   }
 
-     // 5. Nəticəyə Görə Hərəkət Etmək:
-     //    - if (winner) {
-     //       console.log(`🏆 Winner in room ${roomId}: ${username} (${symbol})`);
-     //       io.to(roomId).emit('gameOver', { winnerSymbol: symbol, winnerId: socket.id });
-     //       await pubClient.hSet(`room:${roomId}`, 'status', 'finished'); // Otağın statusunu yenilə
-     //       // Oyun bitdikdən sonra növbəni təmizləyə bilərsiniz:
-     //       // await pubClient.hDel(`room:${roomId}`, 'turn');
-     //    - } else if (draw) {
-     //       console.log(`🤝 Draw in room ${roomId}`);
-     //       io.to(roomId).emit('gameOver', { draw: true });
-     //       await pubClient.hSet(`room:${roomId}`, 'status', 'finished');
-     //       // await pubClient.hDel(`room:${roomId}`, 'turn');
-     //    - } else {
-     //       // Oyun davam edir, növbəni dəyişdirmək lazımdır
-     //       const players = await getPlayersInRoom(pubClient, roomId);
-     //       const nextPlayerId = players.find(pId => pId !== socket.id); // Digər oyunçunu tapırıq
-     //       if (nextPlayerId) {
-     //          await pubClient.hSet(`room:${roomId}`, 'turn', nextPlayerId); // Növbəni Redis-də yeniləyirik
-     //          io.to(roomId).emit('turnChange', { nextPlayerId }); // Klientlərə növbənin kimdə olduğunu bildiririk
-     //          console.log(`Turn changed in ${roomId} to: ${nextPlayerId}`);
-     //       } else {
-     //          console.error(`Error: Could not find next player in room ${roomId}`);
-     //       }
-     //    - }
-     // ---- END Redis ilə Oyun Məntiqi ----
-  });
+   console.log(`[Reconnect Timer] Starting ${RECONNECT_TIMEOUT_MS / 1000}s timer for User ${username} (ID: ${disconnectedUserId}) in room ${roomId}.`);
 
-   // Yenidən başlama (Restart) təklifi hadisəsi
-   socket.on('requestRestart', async () => {
-      const roomId = await getRoomIdForSocket(pubClient, socket.id);
-      if (!roomId) return;
-      console.log(`🔄 ${username} "${roomId}" otağında yenidən başlama təklif edir.`);
-      // Təklifi digər oyunçuya göndəririk
-      socket.to(roomId).emit('restartRequested', { requesterId: socket.id, requesterUsername: username });
-      // Restart vəziyyətini Redis-də idarə etmək olar (kimin təklif etdiyini, kimin qəbul etdiyini)
-      // await pubClient.hSet(`room:${roomId}:restart`, socket.id, 'requested');
-  });
+   const timerId = setTimeout(() => {
+       console.log(`[Reconnect Timeout] Timeout expired for User ${username} (ID: ${disconnectedUserId}) in room ${roomId}.`);
+       const currentRoom = rooms[roomId]; // Timeout anında otağı yenidən yoxla
+       let wasStateChanged = false;
+       if (currentRoom?.gameState) {
+           const state = currentRoom.gameState;
+           const { playerState, opponentState } = findPlayerStates(state, disconnectedUserId);
 
-   // Yenidən başlama təklifini qəbul etmə hadisəsi
-   socket.on('acceptRestart', async () => {
-      const roomId = await getRoomIdForSocket(pubClient, socket.id);
-      if (!roomId) return;
-      console.log(`✅ ${username} "${roomId}" otağında yenidən başlama təklifini qəbul etdi.`);
+           if (playerState && playerState.isDisconnected) { // Hələ də qayıtmayıbsa
+               console.log(`[Reconnect Timeout] Player ${username} did not reconnect. Removing permanently.`);
+               // Oyunçunu qalıcı olaraq sil
+               Object.assign(playerState, { socketId: null, userId: null, username: null, isDisconnected: false, disconnectTime: null, symbol: null, roll: null });
+               wasStateChanged = true;
 
-      // Restart statusunu yoxlamaq (əgər Redis-də saxlanılıbsa)
-      // const requesterId = await pubClient.hGet(`room:${roomId}:restart`, 'requester'); // Məsələn
-      // if (!requesterId) { /* Xəta: Restart təklifi yox idi */ return; }
+               // Restart təklifini ləğv et (əgər varsa)
+               if (state.restartRequestedBy) { state.restartRequestedBy = null; state.restartAcceptedBy = new Set(); }
 
-      // Hər iki oyunçuya restart siqnalı göndəririk
-      io.to(roomId).emit('restartGame'); // Klientlər UI-ı sıfırlamalıdır
+               const opponentSocket = opponentState?.socketId ? io.sockets.sockets.get(opponentState.socketId) : null;
+               if (opponentSocket) { // Rəqib hələ də otaqdadırsa
+                    opponentSocket.emit('opponent_left_game', { username: username, reconnecting: false });
+                    if (state.gamePhase !== 'game_over'){
+                        state.gamePhase = 'waiting'; // Gözləməyə qaytar
+                        state.statusMessage = `${username} yenidən qoşulmadı. Yeni rəqib gözlənilir...`;
+                        // Sıfırlama
+                        state.board = Array(state.boardSize * state.boardSize).fill('');
+                        if(state.player1) { state.player1.roll = null; state.player1.symbol = null; }
+                        if(state.player2) { state.player2.roll = null; state.player2.symbol = null; }
+                        state.currentPlayerSymbol = null; state.diceWinnerSocketId = null; state.symbolPickerSocketId = null;
+                        state.winningCombination = []; state.isGameOver = false; state.winnerSymbol = null;
+                    } else { // Oyun bitmişdi
+                        state.statusMessage = `${username} yenidən qoşulmadı.`;
+                    }
+                    // emitGameStateUpdate(roomId, 'reconnect_timeout_player_removed'); // Sonda edilir
+               } else {
+                    console.log(`[Reconnect Timeout] Room ${roomId} is now empty.`);
+                    startRoomCleanupTimer(roomId, currentRoom.name);
+               }
+                broadcastRoomList(); // Oyunçu sayı dəyişdi
+           }
+       }
+       // Taymeri otaq obyektindən sil
+       if (currentRoom?.disconnectTimers) {
+           delete currentRoom.disconnectTimers[disconnectedUserId];
+       }
+       // Əgər state dəyişibsə və kimsə qalıbsa, update göndər
+       if (wasStateChanged && currentRoom?.gameState && currentRoom.players.length > 0){
+            emitGameStateUpdate(roomId, 'reconnect_timeout_processed');
+       }
 
-      // Oyun vəziyyətini Redis-də sıfırlayırıq
-      // await pubClient.hSet(`room:${roomId}`, 'board', JSON.stringify(Array(9).fill(null)));
-      // await pubClient.hSet(`room:${roomId}`, 'status', 'playing'); // Statusu yenidən playing et
-      // await pubClient.hDel(`room:${roomId}`, 'turn'); // Növbəni təmizlə
-      // await pubClient.del(`room:${roomId}:restart`); // Restart qeydlərini təmizlə
-      // await pubClient.del(`room:${roomId}:player:*`); // Oyunçu simvollarını təmizlə (və ya yenidən zər atma/seçim mərhələsi)
+   }, RECONNECT_TIMEOUT_MS);
 
-      // GƏLƏCƏKDƏ: Restartdan sonra oyuna necə başlanacağını təyin edin (zər atma, simvol seçmə, vs.)
-      // Məsələn, yenidən zər atma siqnalı göndərə bilərsiniz:
-      // io.to(roomId).emit('startDiceRollPhase');
-  });
+   // Taymeri otaq obyektində saxla
+   room.disconnectTimers[disconnectedUserId] = timerId;
+}
 
-// --- END Oyunla bağlı Socket Hadisələri ---
+// --- Yardımçı: Otaq Təmizləmə Taymeri ---
+function startRoomCleanupTimer(roomId, roomName) {
+   if (roomCleanupTimers[roomId]) { clearTimeout(roomCleanupTimers[roomId]); } // Köhnəni sil
+   console.log(`[Room Cleanup] Starting ${ROOM_CLEANUP_DELAY_MS / 60000} min timer for empty room ${roomId} ('${roomName}').`);
+   roomCleanupTimers[roomId] = setTimeout(() => {
+       const roomToCheck = rooms[roomId];
+       let isActivePlayer = false;
+       if(roomToCheck?.gameState?.player1?.socketId && !roomToCheck.gameState.player1.isDisconnected) isActivePlayer = true;
+       if(roomToCheck?.gameState?.player2?.socketId && !roomToCheck.gameState.player2.isDisconnected) isActivePlayer = true;
 
-// =======================================================================
-// BU KOD io.on('connection', ...) BLOKUNDAN VƏ handleDisconnectOrLeave FUNKSİYASINDAN SONRA,
-// FAYLIN ƏN SONUNA YERLƏŞDİRİLMƏLİDİR:
+       // Otaq hələ də mövcuddursa VƏ içində heç kim yoxdursa (həm players[] həm də aktiv state)
+       if (roomToCheck && roomToCheck.players.length === 0 && !isActivePlayer) {
+           console.log(`[Room Cleanup] Timer expired. Deleting empty room ${roomId} ('${roomName}').`);
+           delete rooms[roomId];
+           broadcastRoomList();
+       } else {
+            console.log(`[Room Cleanup] Timer expired for room ${roomId}, but it's no longer empty or doesn't exist. Cleanup cancelled.`);
+       }
+       delete roomCleanupTimers[roomId];
+   }, ROOM_CLEANUP_DELAY_MS);
+}
 
-// --- Server Başlatma və Redis Qoşulması ---
-const PORT = process.env.PORT || 3000; // Portu .env faylından və ya default 3000 götürürük
+// =======================================================
+// ===== Server Start & Stop ============================
+// =======================================================
+console.log('[Setup 7.7] Serverin başladılması məntiqi...'); // (Başlıqdakı nömrəni düzəltdim)
+const PORT = process.env.PORT || 8080; // Portu mühit dəyişənindən və ya default 8080 götürür (Bu sizdə düzgün idi)
+console.log(`[Server Start 7.7] server.listen(${PORT}, '0.0.0.0') çağırılır...`); // Log mesajına '0.0.0.0' əlavə etdim
 
-// Redis klientlərinin hər ikisinin də uğurla qoşulmasını gözləyirik
-Promise.all([pubClient.connect(), subClient.connect()])
-  .then(() => {
-    // Hər iki klient qoşulduqda bu blok işə düşür
-    console.log('✅✅✅ Pub/Sub Redis klientləri uğurla qoşuldu.');
-
-    // Socket.IO üçün Redis adapterini indi konfiqurasiya edirik
-    // Bu, Socket.IO-nun mesajları və otaq məlumatlarını Redis vasitəsilə idarə etməsini təmin edir
-    io.adapter(createAdapter(pubClient, subClient));
-    console.log('✅ Socket.IO Redis adapteri konfiqurasiya edildi.');
-
-    // Yalnız Redis qoşulduqdan və adapter qurulduqdan sonra HTTP serverini dinləməyə başlayırıq
-    server.listen(PORT, () => {
-      console.log(`🚀 Server ${PORT} portunda işləyir`);
-      // Faydalı linkləri göstəririk
-      console.log(`🌐 Əsas giriş/qeydiyyat: http://localhost:${PORT}/ana_sehife/login/login.html`);
-      console.log(`🎮 Oyun lobbisi (girişdən sonra): http://localhost:${PORT}/OYUNLAR/tictactoe/lobby/test_odalar.html`);
+// === DƏYİŞİKLİK BURADADIR ===
+server.listen(PORT, '0.0.0.0', () => { // <<<--- İkinci arqument olaraq '0.0.0.0' əlavə edildi!
+    // ============================
+     const startTime = new Date().toLocaleString('az-AZ', { timeZone: 'Asia/Baku' });
+     console.log('=====================================================================');
+     console.log(`---- Multiplayer Server (Yekun v1) ${PORT} portunda işə düşdü! ----`);
+     console.log(`---- Server Başlama Zamanı: ${startTime} ----`);
+     broadcastRoomList(); // İlkin otaq siyahısını yayımla
+     console.log('=====================================================================');
     });
-  })
-  .catch((err) => {
-    // Əgər Redis klientlərindən hər hansı biri qoşula bilməsə
-    console.error('❌❌❌ Redis-ə qoşulmaq mümkün olmadı! Server işə düşmədi.', err);
-    // Redis olmadan tətbiq düzgün işləməyəcəyi üçün prosesi dayandırırıq
-    process.exit(1); // Xəta kodu ilə çıxış
-  });
 
-// --- END Server Başlatma ---
+    server.on('error', (error) => {
+           console.error(`[Server Start 7.7] server.listen XƏTASI: Port ${PORT} problemi!`, error);
+           if (error.code === 'EADDRINUSE') { console.error(`XƏTA: Port ${PORT} artıq istifadə olunur.`); }
+           process.exit(1);
+        });
+
+// --- Səliqəli Dayandırma ---
+function gracefulShutdown(signal) {
+   console.warn(`\n[Shutdown 7.7] ${signal} siqnalı alındı. Server bağlanır...`);
+   server.close((err) => {
+       if (err) console.error("[Shutdown 7.7] HTTP server bağlanarkən xəta:", err);
+       else console.log('[Shutdown 7.7] HTTP server yeni bağlantıları qəbul etmir.');
+
+       io.close(() => {
+           console.log('[Shutdown 7.7] Bütün Socket.IO bağlantıları bağlandı.');
+           pool.end((dbErr) => {
+               if (dbErr) console.error("[Shutdown 7.7] DB pool bağlanarkən xəta:", dbErr);
+               else console.log('[Shutdown 7.7] DB pool uğurla bağlandı.');
+               console.warn(`[Shutdown 7.7] Server dayandırıldı (${signal}).`);
+               process.exit(err || dbErr ? 1 : 0);
+           });
+       });
+   });
+   // Müəyyən vaxtdan sonra məcburi çıxış
+   setTimeout(() => { console.error('[Shutdown 7.7] Shutdown prosesi çox uzun çəkdi! Məcburi çıxış.'); process.exit(1); }, 10000); // 10 saniyə
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('uncaughtException', (error, origin) => { console.error('[FATAL ERROR] Uncaught Exception:', error, 'Origin:', origin); gracefulShutdown('uncaughtException'); });
+process.on('unhandledRejection', (reason, promise) => { console.error('[FATAL ERROR] Unhandled Rejection at:', promise, 'reason:', reason); gracefulShutdown('unhandledRejection'); });
+
+
+console.log('--- server_multi.js Faylı Tamamlandı (Yekun v1) ---');
+// ============================================
+// ===== server_multi.js FAYLININ SONU ======
+// ============================================

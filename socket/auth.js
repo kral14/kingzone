@@ -1,41 +1,72 @@
-// server/socket/auth.js
-const { pubClient } = require('../config/redis'); // Redis klientini alırıq
-const { getUserInfoKey } = require('../utils/redisHelpers'); // Yardımçı funksiyanı alırıq
+// socket/auth.js
 
-// Socket.IO bağlantıları üçün Autentifikasiya Middleware-i
-// Bu middleware hər yeni socket bağlantısı cəhdində işləyir
-const socketAuthMiddleware = async (socket, next) => {
-    const session = socket.request.session; // Express sessiyasını əldə edirik
+const sessionMiddleware = require('../server/config/session');
+// socket/auth.js
+const { pubClient } = require('../server/config/redis');
+const { getUserInfoKey } = require('../utils/redisHelpers');
 
-    // Sessiya və içində user məlumatları varmı?
-    if (session?.user?.id && session.user.nickname) {
+
+const AUTH_LOG = '[Socket Auth]';
+
+const socketAuthMiddleware = (socket, next) => {
+    // >> AUTH DEBUG: Middleware Başladı <<
+    console.log(`\n>> ${AUTH_LOG} Middleware BAŞLADI. Socket ID: ${socket.id}`);
+    // -----
+    sessionMiddleware(socket.request, {}, async (err) => {
+         // >> AUTH DEBUG: Sessiya middleware bitdi <<
+         console.log(`   ${AUTH_LOG} Session middleware bitdi. Xəta var? ${!!err}`);
+         // -----
+        if (err) {
+             console.error(`${AUTH_LOG} Session middleware xətası:`, err);
+             return next(new Error('Sessiya xətası.'));
+        }
+
+        const session = socket.request.session;
+         // >> AUTH DEBUG: Sessiya obyekti alındı <<
+         console.log(`   ${AUTH_LOG} Session ID: ${session?.id}. User var? ${!!session?.user}`);
+         // -----
+
+        if (!session || !session.user || !session.user.id || !session.user.nickname) {
+             console.warn(`${AUTH_LOG} Sessiyada etibarlı istifadəçi tapılmadı. Socket: ${socket.id}`);
+             return next(new Error('Autentifikasiya olunmayıb.'));
+        }
+
         const userInfo = {
             userId: session.user.id,
-            username: session.user.nickname
+            username: session.user.nickname,
+            // Profil şəklini və digər məlumatları da əlavə edə bilərik, amma auth üçün bunlar kifayətdir
         };
-        const userInfoKey = getUserInfoKey(socket.id);
+
+         // >> AUTH DEBUG: User info formalaşdırıldı <<
+         console.log(`   ${AUTH_LOG} User info formalaşdırıldı:`, userInfo);
+         // -----
+
+        // --- User məlumatını qısa müddətlik Redis-də saxlamaq (Optional, amma debug üçün faydalı) ---
+        const redisUserInfoKey = getUserInfoKey(userInfo.userId);
         try {
-            // User məlumatlarını qısa müddətlik Redis-də saxlayaq (disconnect üçün faydalı ola bilər)
-            await pubClient.hSet(userInfoKey, {
-                userId: userInfo.userId.toString(),
-                username: userInfo.username
-            });
-            await pubClient.expire(userInfoKey, 60 * 60 * 1); // 1 saatlıq expire
-
-            // User məlumatlarını socket obyektinə də əlavə edək ki, disconnect anında əlçatan olsun
-            socket.conn.request.userInfoFromAuth = userInfo; // Bu, disconnect handler-də istifadə olunacaq
-
-            // console.log(`[Socket Auth OK] User info stored for ${socket.id}`);
-            next(); // Autentifikasiya uğurlu, bağlantıya icazə ver
-        } catch (err) {
-            console.error(`[Socket Auth ERROR] Redis user info yazılarkən xəta (Socket: ${socket.id}):`, err);
-            next(new Error('Server xətası: Sessiya məlumatları saxlanılmadı.')); // Xəta ilə rədd et
+             // >> AUTH DEBUG: User info Redis-ə yazılır <<
+             console.log(`   ${AUTH_LOG} User info Redis-ə yazılır... Key: ${redisUserInfoKey}`);
+             // -----
+             await pubClient.set(redisUserInfoKey, JSON.stringify(userInfo), { EX: 300 }); // 5 dəqiqəlik expire
+             console.log(`   ${AUTH_LOG} User info Redis-ə yazıldı (EX: 300s).`);
+        } catch(redisErr) {
+            console.error(`${AUTH_LOG} User info Redis-ə yazılarkən xəta:`, redisErr);
+            // Bu kritik xəta olmamalıdır, davam edək
         }
-    } else {
-        // Sessiya yoxdursa və ya user məlumatı natamamdısa
-        console.warn(`[Socket Auth FAILED] Bağlantı rədd edildi (Sessiya tapılmadı/etibarsız). Socket ID: ${socket.id}`);
-        next(new Error('Authentication Error: Giriş edilməyib və ya sessiya bitib.')); // Xəta ilə rədd et
-    }
+        // --- Redis saxlama sonu ---
+
+        // İstifadəçi məlumatlarını socket bağlantısının request obyektinə əlavə edirik ki,
+        // sonrakı handlerlərdə (məsələn, index.js-də) istifadə edə bilək.
+        socket.conn.request.userInfoFromAuth = userInfo;
+         // >> AUTH DEBUG: User info socket request-ə əlavə edildi <<
+         console.log(`   ${AUTH_LOG} User info socket.conn.request-ə əlavə edildi.`);
+         // -----
+
+         // >> AUTH DEBUG: next() çağırılır <<
+         console.log(`   ${AUTH_LOG} Hər şey qaydasındadır, next() çağırılır...`);
+         // -----
+        next(); // Autentifikasiya uğurludur, növbəti middleware-ə və ya connection handler-ə keç
+    });
 };
 
 module.exports = socketAuthMiddleware;

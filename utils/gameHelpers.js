@@ -2,16 +2,54 @@
 
 // Oyunu başladan və ya sıfırlayan funksiya
 function initializeGameState(boardSize = 3, player1Info = null, player2Info = null) {
+    // Helper function to create initial player state
+    // Accepts playerInfo: { userId, username, id (socketId) }
     const initialPlayerState = (socketInfo) => ({
-        socketId: socketInfo?.id || null, userId: socketInfo?.userId || null, username: socketInfo?.username || null,
-        symbol: null, roll: null, isDisconnected: false, disconnectTime: null
+        socketId: socketInfo?.id || null,       // Use 'id' if passed for socketId
+        userId: socketInfo?.userId || null,
+        username: socketInfo?.username || null,
+        symbol: null,
+        roll: null,
+        // Mark disconnected ONLY if no valid socketId is provided initially
+        // If disconnectHandler passes socketId, they are considered connected here.
+        isDisconnected: !(socketInfo?.id),
+        disconnectTime: null,
+        slot: null // Will be assigned below
     });
+
+    // Create initial states
+    const p1Initial = player1Info ? initialPlayerState(player1Info) : initialPlayerState();
+    if(p1Initial.userId) p1Initial.slot = 1; // Assign slot number if P1 exists
+
+    const p2Initial = player2Info ? initialPlayerState(player2Info) : initialPlayerState();
+    if(p2Initial.userId) p2Initial.slot = 2; // Assign slot number if P2 exists
+
+    // Determine initial status message
+    let initialStatus = "İkinci oyunçu gözlənilir...";
+    if (p1Initial.userId && !p1Initial.isDisconnected && p2Initial.userId && !p2Initial.isDisconnected) {
+        initialStatus = "Oyunçular hazır, zər atma başlayır..."; // Should move to dice_roll phase quickly
+    } else if (p1Initial.userId && !p1Initial.isDisconnected) {
+        initialStatus = `${p1Initial.username} qoşuldu, rəqib gözlənilir...`;
+    } else if (p2Initial.userId && !p2Initial.isDisconnected) {
+        initialStatus = `${p2Initial.username} qoşuldu, rəqib gözlənilir...`;
+    }
+
     return {
-        board: Array(boardSize * boardSize).fill(''), boardSize: boardSize, gamePhase: 'waiting',
-        currentPlayerSymbol: null, player1: initialPlayerState(player1Info), player2: initialPlayerState(player2Info),
-        diceWinnerSocketId: null, symbolPickerSocketId: null, isGameOver: false, winnerSymbol: null,
-        winningCombination: [], statusMessage: "İkinci oyunçu gözlənilir...", lastMoveTime: null,
-        restartRequestedBy: null, restartAcceptedBy: []
+        board: Array(boardSize * boardSize).fill(''),
+        boardSize: boardSize,
+        gamePhase: 'waiting', // Always start/reset to 'waiting'
+        currentPlayerSymbol: null,
+        player1: p1Initial,
+        player2: p2Initial,
+        diceWinnerSocketId: null,
+        symbolPickerSocketId: null,
+        isGameOver: false,
+        winnerSymbol: null,
+        winningCombination: [],
+        statusMessage: initialStatus, // Set initial status message
+        lastMoveTime: null,
+        restartRequestedBy: null,
+        restartAcceptedBy: []
     };
 }
 

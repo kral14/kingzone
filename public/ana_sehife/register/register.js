@@ -57,9 +57,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Məlumatları Serverə Göndərmək (fetch API)
             try {
-                const response = await fetch('/register', { // Backend-dəki endpoint
+                const response = await fetch('/api/auth/register', { // Düzgün endpoint
                     method: 'POST',
                     headers: {
+                       //... (qalan kod olduğu kimi qalır)
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ // Məlumatları JSON olaraq göndər

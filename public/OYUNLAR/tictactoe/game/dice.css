@@ -1,26 +1,40 @@
-/* dice.css - 3D Zar Stilleri, Modal ve Simvol Seçim Modalı (v6 - Üz mövqeləri düzəldildi) */
+/* dice.css - 3D Zar Stilleri, Modal ve Simvol Seçim Modalı (v7 - Keyframes ilə Tam Versiya) */
 
 :root {
-    /* Zar */
+    /* Zar Ölçüləri */
     --dice-size: 110px;
     --dot-size: calc(var(--dice-size) / 6.5);
     --border-radius: calc(var(--dice-size) / 6);
-    --roll-duration: 2.0s;
-    --roll-timing-function: cubic-bezier(0.3, 0.9, 0.4, 1);
+    --initial-center-z: -55px; /* JS bunu yeniləyə bilər (--dice-size / -2) */
 
-    /* Rənglər */
-    --modal-bg: rgba(26, 26, 46, 0.95);
-    --modal-content-bg: #2a2a4e;
-    --modal-text-color: #e0e0ff;
-    --modal-border-color: #4a4a8e;
-    --success-color: #39ff14; /* Neon Yaşıl */
-    --modal-button-bg: var(--success-color);
-    --modal-button-text: #111;
-    --subtle-text: #a0a0cc;
-    --player-x-color: #00ffff; /* Cyan */
-    --player-o-color: #ff00ff; /* Magenta */
+    /* Kənarlıq Stili */
+    --edge-border-thickness: 2px;
+    --edge-border-color: #00ffff; /* Cyan */
+
+    /* Hərəkət və Həssaslıq */
+    --rotate-sensitivity: 0.4; /* JS tərəfindən istifadə edilir */
+
+    /* Animasiya - DİQQƏT: Bu dəyərlər diceManager.js tərəfindən transition üçün istifadə edilir */
+    --roll-duration: 2.0s; /* JS bu dəyəri oxuyur */
+    --roll-timing-function: cubic-bezier(0.25, 0.9, 0.5, 1.0); /* JS bu dəyəri oxuyur */
+
+    /* Duman Rəngləri */
+    --smoke-color-1: rgba(173, 216, 230, 0.6); /* Light Blue */
+    --smoke-color-2: rgba(255, 255, 255, 0.7); /* White */
+
+    /* Modal və Ümumi Rənglər */
+    --modal-bg: rgba(26, 26, 46, 0.95); /* Tünd bənövşəyi fon */
+    --modal-content-bg: #2a2a4e; /* Bir az daha açıq bənövşəyi */
+    --modal-text-color: #e0e0ff; /* Açıq lavanda mətni */
+    --modal-border-color: #4a4a8e; /* Bənövşəyi sərhəd */
+    --success-color: #39ff14; /* Neon yaşıl */
+    --warning-color: #ffc107; /* Sarı/Narıncı */
+    --modal-button-bg: var(--success-color); /* Əgər modalda xüsusi düymə olarsa */
+    --modal-button-text: #111; /* Tünd düymə mətni */
+    --subtle-text: #a0a0cc; /* Solğun lavanda */
+    --player-x-color: #00ffff; /* Cyan (X üçün) */
+    --player-o-color: #ff00ff; /* Magenta (O üçün) */
     --primary-color: #4a90e2; /* Mavi */
-    --warning-color: #ffc107; /* Sarı */
 
     /* Simvol Seçim */
     --symbol-button-bg: rgba(74, 144, 226, 0.3);
@@ -28,101 +42,137 @@
     --symbol-button-border: var(--primary-color);
 }
 
-/* --- Zar Stilləri --- */
+/* --- Zar Modalının Ümumi Stili --- */
+.modal#dice-roll-modal {
+    display: none; /* Başlanğıcda gizli */
+    position: fixed;
+    z-index: 1055; /* Digər modallardan üstdə ola bilər */
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: var(--modal-bg);
+    backdrop-filter: blur(5px);
+    padding-top: 5vh; /* Yuxarıdan boşluq */
+    animation: modalBackdropFadeIn 0.3s ease-out; /* Arxa fon üçün solğun giriş */
+}
+
+.modal#dice-roll-modal .modal-content {
+    background-color: var(--modal-content-bg);
+    color: var(--modal-text-color);
+    margin: 5% auto;
+    padding: 25px 30px;
+    border: 1px solid var(--modal-border-color);
+    width: 90%;
+    max-width: 450px; /* Maksimum en */
+    border-radius: 10px;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    animation: modalContentSlideIn 0.3s ease-out; /* İçərik üçün yuxarıdan sürüşmə */
+    text-align: center;
+}
+
+.modal#dice-roll-modal .modal-body {
+    padding-top: 15px;
+}
+
+/* --- Zar Modalının İçindəki Elementlər --- */
 .dice-modal .instructions {
     font-size: 1em;
     text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
     margin-bottom: 15px;
     text-align: center;
     max-width: 90%;
-    color: var(--modal-text-color); /* Varsayılan rəng */
-    min-height: 2.4em;
+    margin-left: auto; /* Mərkəzləmək üçün */
+    margin-right: auto; /* Mərkəzləmək üçün */
+    color: var(--modal-text-color);
+    min-height: 2.4em; /* İçərik dəyişəndə sıçramasın */
     line-height: 1.2;
     transition: color 0.3s ease, text-shadow 0.3s ease;
 }
-
-/* Rəqib qoşulduqda stil */
-.dice-modal .instructions.opponent-joined {
-    color: var(--success-color, #39ff14);
-    font-weight: bold;
-    text-shadow: 0 0 5px var(--success-color, #39ff14),
-                 1px 1px 2px rgba(0,0,0,0.7);
-    animation: glowPulse 1.5s infinite alternate ease-in-out;
-}
-
-/* Gözləmə vəziyyəti stili */
 .dice-modal .instructions.waiting {
-    color: var(--modal-text-color, #e0e0ff);
+    color: var(--subtle-text, #a0a0cc); /* Gözləmə rəngi */
     font-weight: normal;
-    animation: none;
+    animation: none; /* Gözləmə animasiyası lazım olsa əlavə edilə bilər */
+}
+.dice-modal .instructions.tie-instruction {
+   color: var(--warning-color, #ffc107); /* Bərabərlik rəngi */
+   font-weight: bold;
 }
 
-/* Neon parıltı animasiyası */
-@keyframes glowPulse {
-    from {
-        text-shadow: 0 0 4px var(--success-color, #39ff14),
-                     1px 1px 2px rgba(0,0,0,0.7);
-        opacity: 0.9;
-    }
-    to {
-        text-shadow: 0 0 10px var(--success-color, #39ff14),
-                     0 0 15px rgba(57, 255, 20, 0.5),
-                     1px 1px 2px rgba(0,0,0,0.7);
-        opacity: 1;
-    }
-}
-
+/* Zərin dayandığı səth */
 .dice-modal .table-surface {
-    width: 100%; max-width: 280px; height: 200px;
-    perspective: 1200px; position: relative; display: flex;
-    justify-content: center; align-items: center;
-    background: radial-gradient(ellipse at center, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 60%);
-    margin: 0 auto;
-}
-.dice-modal .scene {
-    width: var(--dice-size); height: var(--dice-size); position: absolute;
-    filter: drop-shadow(0 8px 12px rgba(0,0,0,0.4));
-    transform-style: preserve-3d;
-    transition: transform 0.5s ease-out, opacity 0.5s ease-out;
-}
-.dice-modal .scene.scatter {
-    transform: scale(0.1) rotateZ(180deg) translateY(100px); opacity: 0;
+    width: 100%;
+    max-width: 280px; /* Səthin maksimum eni */
+    height: 200px; /* Səthin hündürlüyü */
+    perspective: 1200px; /* 3D effekt üçün perspektiv */
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: radial-gradient(ellipse at center, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 60%); /* Yüngül işıq effekti */
+    margin: 0 auto 15px auto; /* Aşağıdan da boşluq */
 }
 
+/* --- 3D Səhnə və Küp --- */
+/* Səhnə: Küpün yerləşdiyi 3D məkan */
+.dice-modal .scene {
+    width: var(--dice-size);
+    height: var(--dice-size);
+    position: relative;
+    filter: drop-shadow(0 10px 15px rgba(0,0,0,0.6)); /* Küpün kölgəsi */
+    transform-style: preserve-3d; /* İçindəki elementlərin 3D qalmasını təmin et */
+}
+
+/* Küpün özü */
 .dice-modal .cube {
-    width: 100%; height: 100%; position: relative; transform-style: preserve-3d;
-    transform: translateZ(calc(var(--dice-size) / -2));
-    cursor: grab; /* Tutma imleci */
+    width: 100%;
+    height: 100%;
+    position: relative;
+    transform-style: preserve-3d;
+    /* İlkin transform JS tərəfindən təyin edilir (translateZ daxil) */
+    cursor: grab; /* Başlanğıcda tutula bilən */
 }
 .dice-modal .cube:active {
-    cursor: grabbing; /* Tutarkən imlec */
+    cursor: grabbing; /* Tutulduqda */
 }
 
+/* Küpün Hər Üzü */
 .dice-modal .cube__face {
-    position: absolute; width: var(--dice-size); height: var(--dice-size);
-    background: linear-gradient(145deg, rgba(200, 60, 60, 0.95) 0%, rgba(150, 25, 25, 0.95) 100%);
-    border-radius: var(--border-radius); border: 1px solid rgba(255, 255, 255, 0.25);
-    box-shadow: inset 0 0 calc(var(--dice-size) / 8) rgba(0,0,0,0.65),
-                inset 0.5px 0.5px 1px rgba(255, 255, 255, 0.3),
-                inset -0.5px -0.5px 1px rgba(255, 255, 255, 0.2),
-                0px 3px 8px rgba(0, 0, 0, 0.3);
-    display: grid; box-sizing: border-box; backface-visibility: hidden;
-    padding: calc(var(--dice-size) / 10);
-    overflow: hidden;
-    user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;
+    position: absolute;
+    width: var(--dice-size);
+    height: var(--dice-size);
+    background: linear-gradient(145deg, rgba(200, 60, 60, 0.95) 0%, rgba(150, 25, 25, 0.95) 100%); /* Qırmızı gradient */
+    border-radius: var(--border-radius);
+    border: var(--edge-border-thickness) solid var(--edge-border-color); /* Kənar xətti */
+    box-shadow: inset 0 0 calc(var(--dice-size) / 8) rgba(0,0,0,0.65), /* İç kölgə */
+                0px 3px 8px rgba(0, 0, 0, 0.3); /* Xarici kölgə */
+    display: grid; /* Nöqtələri yerləşdirmək üçün */
+    box-sizing: border-box;
+    backface-visibility: hidden; /* Arxa üz görünməsin */
+    padding: calc(var(--dice-size) / 10); /* Nöqtələr üçün iç boşluq */
+    user-select: none; /* Mətn seçilməsin */
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    overflow: hidden; /* Kənara çıxan olmasın */
 }
-.dice-modal .cube__face::before { /* Parlama */
+/* Üz Parlaqlıq Effekti */
+.dice-modal .cube__face::before {
     content: ''; position: absolute; top: -20%; left: -20%; width: 70%; height: 70%;
     background: radial-gradient(ellipse at center, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 70%);
     transform: rotate(45deg); opacity: 0.8; pointer-events: none;
 }
+/* Nöqtə Stili */
 .dice-modal .dot {
     width: var(--dot-size); height: var(--dot-size); border-radius: 50%;
-    background-color: #f8f8f8; box-shadow: inset 1px 1px 4px rgba(0,0,0,0.7);
+    background-color: #f8f8f8; /* Ağımtıl nöqtə rəngi */
+    box-shadow: inset 1px 1px 4px rgba(0,0,0,0.7); /* Nöqtənin iç kölgəsi */
     justify-self: center; align-self: center; border: 1px solid rgba(0,0,0,0.1);
 }
 
-/* Nokta Düzenleri (Dəyişməz) */
+/* Nöqtə Düzənləri (Grid Template Areas ilə) */
 .dice-modal .cube__face--1 { grid-template-areas: ". . ." ". a ." ". . ."; } .dice-modal .cube__face--1 .dot:nth-child(1) { grid-area: a; }
 .dice-modal .cube__face--2 { grid-template-areas: "a . ." ". . ." ". . b"; } .dice-modal .cube__face--2 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--2 .dot:nth-child(2) { grid-area: b; }
 .dice-modal .cube__face--3 { grid-template-areas: "a . ." ". b ." ". . c"; } .dice-modal .cube__face--3 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--3 .dot:nth-child(2) { grid-area: b; } .dice-modal .cube__face--3 .dot:nth-child(3) { grid-area: c; }
@@ -130,67 +180,121 @@
 .dice-modal .cube__face--5 { grid-template-areas: "a . b" ". e ." "c . d"; gap: calc(var(--dot-size) / 3); } .dice-modal .cube__face--5 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--5 .dot:nth-child(2) { grid-area: b; } .dice-modal .cube__face--5 .dot:nth-child(3) { grid-area: c; } .dice-modal .cube__face--5 .dot:nth-child(4) { grid-area: d; } .dice-modal .cube__face--5 .dot:nth-child(5) { grid-area: e; }
 .dice-modal .cube__face--6 { grid-template-areas: "a . d" "b . e" "c . f"; gap: calc(var(--dot-size) / 3); } .dice-modal .cube__face--6 .dot:nth-child(1) { grid-area: a; } .dice-modal .cube__face--6 .dot:nth-child(2) { grid-area: b; } .dice-modal .cube__face--6 .dot:nth-child(3) { grid-area: c; } .dice-modal .cube__face--6 .dot:nth-child(4) { grid-area: d; } .dice-modal .cube__face--6 .dot:nth-child(5) { grid-area: e; } .dice-modal .cube__face--6 .dot:nth-child(6) { grid-area: f; }
 
-/* Yüz Konumları (Orijinala qaytarıldı) */
-.dice-modal .cube__face--front  { transform: rotateY(  0deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 1 */
-.dice-modal .cube__face--back   { transform: rotateY(180deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 6 */
-.dice-modal .cube__face--right  { transform: rotateY( 90deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 3 (Sağda) */
-.dice-modal .cube__face--left   { transform: rotateY(-90deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 4 (Solda) */
-.dice-modal .cube__face--top    { transform: rotateX( 90deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 2 (Yuxarıda) */
-.dice-modal .cube__face--bottom { transform: rotateX(-90deg) translateZ(calc(var(--dice-size) / 2)); } /* Üz 5 (Aşağıda) */
+/* Üz Mövqeləri (Küpü necə formalaşdırır) */
+.dice-modal .cube__face--1 { transform: rotateY(  0deg) translateZ(calc(var(--dice-size) / 2)); } /* Ön */
+.dice-modal .cube__face--6 { transform: rotateY(180deg) translateZ(calc(var(--dice-size) / 2)); } /* Arxa */
+.dice-modal .cube__face--3 { transform: rotateY( 90deg) translateZ(calc(var(--dice-size) / 2)); } /* Sağ */
+.dice-modal .cube__face--4 { transform: rotateY(-90deg) translateZ(calc(var(--dice-size) / 2)); } /* Sol */
+.dice-modal .cube__face--2 { transform: rotateX( 90deg) translateZ(calc(var(--dice-size) / 2)); } /* Yuxarı */
+.dice-modal .cube__face--5 { transform: rotateX(-90deg) translateZ(calc(var(--dice-size) / 2)); } /* Aşağı */
 
+/* --- Duman Effekti --- */
+.dice-modal .scene::before,
+.dice-modal .scene::after {
+    content: ''; position: absolute; width: 150%; height: 150%; top: -25%; left: -25%;
+    background: radial-gradient(ellipse at center, var(--smoke-color-2) 10%, var(--smoke-color-1) 50%, transparent 70%);
+    border-radius: 50%; filter: blur(25px); opacity: 0; transform: scale(0.5);
+    transition: opacity 0.4s ease-out, transform 0.4s ease-out; pointer-events: none; z-index: -1;
+}
+.dice-modal .scene::after {
+    background: radial-gradient(ellipse at center, var(--smoke-color-2) 5%, var(--smoke-color-1) 40%, transparent 60%);
+    filter: blur(35px); transform: scale(0.4); transition-delay: 0.1s;
+}
+/* Duman pulsasiya animasiyası */
+@keyframes smokePulse {
+  0%, 100% { transform: scale(1.1); opacity: 0.6; }
+  50% { transform: scale(1.3); opacity: 0.8; }
+}
+/* Bu klass JS tərəfindən əlavə edilir/qaldırılır */
+.dice-modal .scene.is-smoking::before,
+.dice-modal .scene.is-smoking::after {
+    opacity: 0.7; transform: scale(1); animation: smokePulse 1.5s ease-in-out infinite alternate;
+}
+.dice-modal .scene.is-smoking::after { animation-delay: -0.5s; }
 
-/* Zar Nəticə Sahələri (Dəyişməz) */
+/* --- Zar Nəticə Sahələri --- */
 .dice-modal .dice-results-area {
     display: flex; justify-content: space-around; align-items: flex-start;
-    margin-top: 20px; margin-bottom: 15px; min-height: 4.5em; width: 100%;
-    padding: 10px 0;
+    margin-top: 25px; /* Səhnədən biraz aralı */
+    margin-bottom: 15px; min-height: 4.5em; width: 100%; padding: 10px 0;
     border-top: 1px solid var(--modal-border-color);
     border-bottom: 1px solid var(--modal-border-color);
 }
-.dice-modal .result-box {
-    text-align: center; font-size: 0.9em; color: var(--subtle-text); width: 45%;
-}
-.dice-modal .result-box .label {
-    display: block; margin-bottom: 5px; font-weight: 600;
-}
-.dice-modal .result-box .value {
-    display: block; font-size: 2.2em; font-weight: bold; line-height: 1;
-    color: var(--modal-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.6);
-    min-height: 1em;
-}
-.dice-modal .result-box.winner .value {
-    color: var(--modal-button-bg); text-shadow: 0 0 8px var(--modal-button-bg);
-}
-.dice-modal .result-box.tie .value {
-    color: var(--warning-color); text-shadow: 0 0 6px var(--warning-color);
+.dice-modal .result-box { text-align: center; font-size: 0.9em; color: var(--subtle-text); width: 45%; }
+.dice-modal .result-box .label { display: block; margin-bottom: 5px; font-weight: 600; }
+.dice-modal .result-box .value { display: block; font-size: 2.2em; font-weight: bold; line-height: 1; color: var(--modal-text-color); text-shadow: 1px 1px 2px rgba(0,0,0,0.6); min-height: 1em; }
+.dice-modal .result-box.winner .value { color: var(--success-color); text-shadow: 0 0 8px var(--success-color); }
+.dice-modal .result-box.tie .value { color: var(--warning-color); text-shadow: 0 0 6px var(--warning-color); }
+
+/* --- Zər Atılma Animasiyası (@keyframes) - DİQQƏT: Hazırda diceManager.js bunu istifadə ETMİR --- */
+/* Bu keyframes yalnız CSS ilə animasiya etmək istəsəniz lazımdır. */
+@keyframes dice-throw {
+  0%   { transform: translateZ(calc(var(--initial-center-z, -55px) - 10px)) translateY(-20px) rotateX(0deg)   rotateY(0deg)   rotateZ(0deg)   scale(0.95); opacity: 0.8; animation-timing-function: cubic-bezier(0.3, 0, 0.7, 1); }
+  20%  { transform: translateZ(calc(var(--initial-center-z, -55px) - 50px)) translateY(-80px) rotateX(180deg) rotateY(90deg)  rotateZ(45deg)  scale(1.1);  opacity: 1;   animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); } /* Yuxarı atılma */
+  40%  { transform: translateZ(calc(var(--initial-center-z, -55px) - 60px)) translateY(-90px) rotateX(360deg) rotateY(270deg) rotateZ(180deg) scale(1.05);                 animation-timing-function: ease-in; } /* Havadakı fırlanma */
+  70%  { transform: translateZ(calc(var(--initial-center-z, -55px) + 5px))  translateY(5px)   rotateX(540deg) rotateY(450deg) rotateZ(270deg) scale(1);    opacity: 1;   animation-timing-function: cubic-bezier(0.6, 0.04, 0.98, 0.335); } /* Yerə enmə, yüngül sıçrayış */
+  85%  { transform: translateZ(calc(var(--initial-center-z, -55px) - 5px))  translateY(-10px) rotateX(630deg) rotateY(500deg) rotateZ(315deg) scale(1.02);                 animation-timing-function: ease-out; } /* Sıçrayışdan geri qayıtma */
+  100% { transform: translateZ(var(--initial-center-z, -55px))             translateY(0px)   rotateX(720deg) rotateY(540deg) rotateZ(360deg) scale(1);    opacity: 1; } /* Son dayanma */
 }
 
-/* Zar At Düyməsi Stili (HTML-dən silindiyi üçün artıq lazım deyil) */
-/* .dice-modal #roll-dice-button { ... } */
-
-
-/* Zar Modalı Pəncərə Stilləri (Dəyişməz) */
-.modal#dice-roll-modal { display: none; position: fixed; z-index: 1055; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: var(--modal-bg); backdrop-filter: blur(5px); padding-top: 5vh; animation: modalBackdropFadeIn 0.3s ease-out; }
-.modal#dice-roll-modal .modal-content { background-color: var(--modal-content-bg); color: var(--modal-text-color); margin: 5% auto; padding: 25px 30px; border: 1px solid var(--modal-border-color); width: 90%; max-width: 450px; border-radius: 10px; position: relative; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); animation: modalContentSlideIn 0.3s ease-out; text-align: center; }
-.modal#dice-roll-modal .modal-body { padding-top: 15px; }
-.modal#dice-roll-modal .close-button {
-    color: var(--subtle-text); position: absolute; top: 10px; right: 15px; font-size: 28px; font-weight: bold; cursor: pointer; transition: color 0.2s ease, transform 0.2s ease; z-index: 10;
+/* Animasiyanı işə salan klass (əgər keyframes istifadə edilsə) */
+.dice-modal .cube.is-rolling {
+  /* animation: dice-throw var(--roll-duration, 2.0s) var(--roll-timing-function, ease-out) forwards; */
+  /* YUXARIDAKI SƏTR ŞƏRHƏ ALINDI, ÇÜNKİ JS TRANSITION İSTİFADƏ EDİR */
+  transition: none !important; /* JS transition təyin etdiyi üçün bu vacibdir ki, keyframes mane olmasın */
 }
-.modal#dice-roll-modal .close-button:hover, .modal#dice-roll-modal .close-button:focus { color: #fff; transform: scale(1.1); }
 
+/* ===== SİMVOL SEÇİM MODALI STİLLƏRİ ===== */
+.modal#symbol-select-modal {
+    display: none; position: fixed; z-index: 1060; /* Zər modalından üstdə */
+    left: 0; top: 0; width: 100%; height: 100%; overflow: auto;
+    background-color: var(--modal-bg); backdrop-filter: blur(5px);
+    padding-top: 15vh; animation: modalBackdropFadeIn 0.3s ease-out;
+}
+.modal#symbol-select-modal .modal-content {
+    background-color: var(--modal-content-bg); color: var(--modal-text-color);
+    margin: 5% auto; padding: 30px 40px; border: 1px solid var(--modal-border-color);
+    width: 90%; max-width: 400px; border-radius: 10px; position: relative;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); animation: modalContentSlideIn 0.3s ease-out;
+    text-align: center;
+}
+#symbol-select-title { margin-bottom: 15px; color: #fff; font-size: 1.4em; }
+#symbol-select-message { margin-bottom: 25px; font-size: 1em; color: var(--subtle-text); }
+.symbol-options { display: flex; justify-content: space-around; margin-bottom: 20px; }
+.symbol-button {
+    font-family: 'Orbitron', sans-serif; font-size: 3em; font-weight: bold; color: #fff;
+    background-color: var(--symbol-button-bg); border: 2px solid var(--symbol-button-border);
+    border-radius: 50%; width: 90px; height: 90px; cursor: pointer;
+    display: flex; justify-content: center; align-items: center;
+    transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    text-shadow: 0 0 8px rgba(0,0,0,0.5);
+}
+.symbol-button:hover:not(:disabled) { background-color: var(--symbol-button-hover-bg); transform: scale(1.05); box-shadow: 0 0 15px var(--symbol-button-border); }
+.symbol-button:active:not(:disabled) { transform: scale(0.98); }
+.symbol-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.symbol-button.symbol-x { color: var(--player-x-color); border-color: var(--player-x-color); }
+.symbol-button.symbol-x:hover:not(:disabled) { box-shadow: 0 0 15px var(--player-x-color); }
+.symbol-button.symbol-o { color: var(--player-o-color); border-color: var(--player-o-color); }
+.symbol-button.symbol-o:hover:not(:disabled) { box-shadow: 0 0 15px var(--player-o-color); }
+#symbol-waiting-message { font-style: italic; color: var(--subtle-text); font-size: 0.9em; min-height: 1.2em; }
 
-/* ===== SİMVOL SEÇİM MODALI STİLLƏRİ ===== (Dəyişməz) */
-.modal#symbol-select-modal { display: none; position: fixed; z-index: 1060; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: var(--modal-bg); backdrop-filter: blur(8px); padding-top: 15vh; animation: modalBackdropFadeIn 0.4s ease-out; }
-.modal#symbol-select-modal .modal-content { background-color: var(--modal-content-bg); color: var(--modal-text-color); margin: auto; padding: 35px 40px; border: 1px solid var(--modal-border-color); width: 90%; max-width: 400px; border-radius: 10px; position: relative; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6); animation: modalContentSlideIn 0.4s ease-out; text-align: center; }
-.modal#symbol-select-modal h3 { margin-bottom: 20px; color: #fff; font-weight: 700; font-size: 1.5em; text-shadow: 0 0 6px var(--primary-color); }
-.modal#symbol-select-modal p { margin-bottom: 30px; color: var(--subtle-text); font-size: 1em; }
-.modal#symbol-select-modal .symbol-options { display: flex; justify-content: center; gap: 30px; }
-.modal#symbol-select-modal .symbol-button { background-color: var(--symbol-button-bg); border: 2px solid var(--symbol-button-border); color: var(--modal-text-color); width: 100px; height: 100px; border-radius: 50%; cursor: pointer; font-size: 3.5rem; font-weight: bold; font-family: 'Orbitron', sans-serif; display: flex; justify-content: center; align-items: center; transition: all 0.2s ease; }
-.modal#symbol-select-modal .symbol-button.symbol-x { color: var(--player-x-color); text-shadow: 0 0 10px var(--player-x-color); }
-.modal#symbol-select-modal .symbol-button.symbol-o { color: var(--player-o-color); text-shadow: 0 0 10px var(--player-o-color); }
-.modal#symbol-select-modal .symbol-button:hover { background-color: var(--symbol-button-hover-bg); transform: scale(1.1); box-shadow: 0 0 15px var(--symbol-button-border); }
-.modal#symbol-select-modal .waiting-message { font-style: italic; color: var(--subtle-text); margin-top: 20px; }
-
-/* Animasiyalar (Dəyişməz) */
+/* Modal Animasiyaları */
 @keyframes modalBackdropFadeIn { from { background-color: rgba(26, 26, 46, 0); } to { background-color: var(--modal-bg); } }
 @keyframes modalContentSlideIn { from { opacity: 0; transform: translateY(-40px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Kiçik ekranlar üçün zər ölçüsünü tənzimləmək (lazım gələrsə) */
+@media (max-width: 480px) {
+  :root {
+    --dice-size: 90px; /* Mobil üçün daha kiçik */
+    /* --dot-size, --border-radius avtomatik hesablanacaq */
+  }
+  .modal#dice-roll-modal .modal-content {
+      padding: 20px 15px;
+      max-width: 300px;
+  }
+  .symbol-button {
+      width: 70px;
+      height: 70px;
+      font-size: 2.5em;
+  }
+}

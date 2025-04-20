@@ -1,10 +1,11 @@
-// server/socket/gameHandlers.js
-const { pubClient } = require('../config/redis');
-const { findPlayerStatesByUserId, handleMakeMoveServer } = require('../utils/gameHelpers');
+// --- BU BLOK DÜZGÜN OLANDIR (Başqa heç nə olmamalıdır bundan əvvəl) ---
+const { pubClient } = require('../server/config/redis');
+// initializeGameState buraya əlavə olunmalıdır:
+const { findPlayerStatesByUserId, handleMakeMoveServer, initializeGameState } = require('../utils/gameHelpers');
 const { getSocketRoomKey, getRoomDataFromRedis, saveGameStateToRedis, emitGameStateUpdateRedis } = require('../utils/redisHelpers');
-
+// --- ---
 // Zər Atma Handler-i
-exports.handleDiceRoll = async (socket, io, data, userInfo) => {
+async function handleDiceRoll(socket, io, data, userInfo) {
     const roomId = await pubClient.get(getSocketRoomKey(socket.id));
     if (!roomId) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
     if (!data || typeof data.roll !== 'number' || data.roll < 1 || data.roll > 6) return socket.emit('game_error', { message: 'Keçərsiz zər nəticəsi.' });
@@ -33,7 +34,7 @@ exports.handleDiceRoll = async (socket, io, data, userInfo) => {
 };
 
 // Simvol Seçimi Handler-i
-exports.handleSymbolChoice = async (socket, io, data, userInfo) => {
+ async function handleSymbolChoice(socket, io, data, userInfo) {
     const roomId = await pubClient.get(getSocketRoomKey(socket.id));
     if (!roomId) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
     if (!data || (data.symbol !== 'X' && data.symbol !== 'O')) return socket.emit('game_error', { message: 'Keçərsiz simvol seçimi.' });
@@ -55,7 +56,7 @@ exports.handleSymbolChoice = async (socket, io, data, userInfo) => {
 };
 
 // Gediş Etmə Handler-i
-exports.handleMakeMove = async (socket, io, data, userInfo) => {
+async function handleMakeMove(socket, io, data, userInfo) {
     const roomId = await pubClient.get(getSocketRoomKey(socket.id));
     if (!roomId) return socket.emit('invalid_move', { message: 'Oyun tapılmadı.' });
     const index = data?.index;
@@ -75,7 +76,7 @@ exports.handleMakeMove = async (socket, io, data, userInfo) => {
 };
 
 // Restart Təklifi Handler-i
-exports.handleRequestRestart = async (socket, io, data, userInfo) => {
+   async function handleRequestRestart(socket, io, data, userInfo) {
     const roomId = await pubClient.get(getSocketRoomKey(socket.id));
     if (!roomId) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
     try {
@@ -92,7 +93,7 @@ exports.handleRequestRestart = async (socket, io, data, userInfo) => {
 };
 
 // Restart Qəbul Etmə Handler-i
-exports.handleAcceptRestart = async (socket, io, data, userInfo) => {
+async function handleAcceptRestart(socket, io, data, userInfo) {
     const roomId = await pubClient.get(getSocketRoomKey(socket.id));
     if (!roomId) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
     try {
@@ -111,7 +112,7 @@ exports.handleAcceptRestart = async (socket, io, data, userInfo) => {
 };
 
 // Restart Rədd Etmə Handler-i
-exports.handleDeclineRestart = async (socket, io, data, userInfo) => {
+async function handleDeclineRestart(socket, io, data, userInfo) {
     const roomId = await pubClient.get(getSocketRoomKey(socket.id));
     if (!roomId) return socket.emit('game_error', { message: 'Oyun tapılmadı.' });
     try {

@@ -1,7 +1,7 @@
-// public/OYUNLAR/oyunlar/oyunlar.js (v4 - Auth Check Delay, Logout, Profil Edit ilə Tam Kod)
+// public/OYUNLAR/oyunlar/oyunlar.js (v4 - Düzəlişli + Çıxış Təsdiq/Animasiya/Gecikmə)
 
-document.addEventListener('DOMContentLoaded', () => { // async burdan silinir, setTimeout içinə keçir
-    console.log("Oyunlar JS (v4 - Delay Fix) Başladı.");
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("Oyunlar JS (v4 - Delay Fix + Logout Enhancement) Başladı.");
 
     // --- DOM Elementləri ---
     const welcomePlayerSpan = document.getElementById('welcome-player');
@@ -13,30 +13,38 @@ document.addEventListener('DOMContentLoaded', () => { // async burdan silinir, s
     const editFullNameInput = document.getElementById('edit-fullName');
     const editEmailInput = document.getElementById('edit-email');
     const editNicknameInput = document.getElementById('edit-nickname');
+    const cancelProfileBtn = document.getElementById('cancel-profile-button');
     const editPasswordInput = document.getElementById('edit-password');
     const editConfirmPasswordInput = document.getElementById('edit-confirmPassword');
     const editProfileMessage = document.getElementById('edit-profile-message');
     const saveProfileButton = document.getElementById('save-profile-button');
     const currentNicknameInput = document.getElementById('edit-current-nickname');
-
+    const loadingOverlay = document.getElementById('loading-overlay'); // Animasiya elementi
     let loggedInUser = null;
 
     // --- Yardımçı Funksiyalar ---
-    const showModal = (modal) => { if (modal) modal.style.display = 'block'; };
+    const showModal = (modal) => { if (modal) modal.style.display = 'flex'; };
     const hideModal = (modal) => { if (modal) modal.style.display = 'none'; };
+
     const showMsg = (el, msg, type = 'error') => {
         if (!el) return;
         el.textContent = msg;
-        el.style.color = type === 'success' ? '#39ff14' : '#ff4d4d';
-        el.style.backgroundColor = type === 'success' ? 'rgba(57, 255, 20, 0.15)' : 'rgba(255, 77, 77, 0.15)';
-        el.style.borderColor = type === 'success' ? 'rgba(57, 255, 20, 0.5)' : 'rgba(255, 77, 77, 0.5)';
-        // Mesajın görünməsi üçün stil əlavə edək (əgər CSS-də yoxdursa)
+        // --- Stil təyin etmək üçün daha etibarlı yol ---
+        el.className = 'message'; // Əvvəlki tipləri təmizlə
+        el.classList.add(type); // Yeni tipi əlavə et
+        // Stil atributlarını birbaşa dəyişmək əvəzinə CSS klasları istifadə etmək daha yaxşıdır
+        // Amma əgər CSS-də error/success/info klasları yoxdursa, əvvəlki stil kodları qala bilər.
+        // Sadəlik üçün əvvəlki stil kodlarını saxlayıram:
+        el.style.color = type === 'success' ? '#39ff14' : (type === 'info' ? '#6aaaff' : '#ff4d4d');
+        el.style.backgroundColor = type === 'success' ? 'rgba(57, 255, 20, 0.15)' : (type === 'info' ? 'rgba(74, 144, 226, 0.1)' : 'rgba(255, 77, 77, 0.15)');
+        el.style.borderColor = type === 'success' ? 'rgba(57, 255, 20, 0.5)' : (type === 'info' ? 'rgba(74, 144, 226, 0.3)' : 'rgba(255, 77, 77, 0.5)');
         el.style.padding = '8px 12px';
         el.style.marginTop = '15px';
         el.style.borderRadius = '5px';
         el.style.borderWidth = '1px';
         el.style.borderStyle = 'solid';
         el.style.minHeight = '1.3em';
+        // ---------------------------------------------
     };
     function escapeHtml(unsafe) {
         if (typeof unsafe !== 'string') return String(unsafe);
@@ -44,143 +52,251 @@ document.addEventListener('DOMContentLoaded', () => { // async burdan silinir, s
     }
 
     // ===== AUTENTİFİKASİYA YOXLAMASI (GECİKMƏ İLƏ) =====
-    // Brauzerə yeni cookie-ni emal etmək üçün kiçik bir vaxt veririk
-    setTimeout(async () => { // <<<--- setTimeout BAŞLANĞICI
+    setTimeout(async () => {
         try {
             console.log("Oyunlar səhifəsi: /check-auth sorğusu göndərilir (gecikmə ilə)...");
-            const response = await fetch('/check-auth', {
+            const response = await fetch('/api/auth/check-auth', {
                 method: 'GET',
-                credentials: 'include' // Cookie göndərilir
+                credentials: 'include'
             });
-            const data = await response.json();
+            // Cavabı JSON kimi almağa çalışaq, xəta olarsa tutaq
+            let data;
+            try {
+                data = await response.json();
+            } catch (jsonError) {
+                console.error("Auth check cavabı JSON deyil:", response.status, response.statusText);
+                throw new Error(`Serverdən gözlənilməz cavab alındı (${response.status}).`);
+            }
 
-            if (!response.ok || !data.loggedIn) {
+            if (!response.ok || !data.loggedIn || !data.user) { // user obyektini də yoxlayaq
                 console.log("Oyunlar JS: Giriş edilməyib (check-auth), login səhifəsinə yönləndirilir...");
-                window.location.href = '/ana_sehife/login/login.html'; // Başdakı ../../ silindi, / əlavə edildi
+                window.location.href = '/ana_sehife/login/login.html';
                 return;
             }
 
-            // Giriş edilib
             loggedInUser = data.user;
             console.log(`Oyunlar JS: Giriş edilib: ${loggedInUser.nickname}`);
-
-            // UI elementlərini və Listenerları quraşdır
-            setupUIAndListeners();
+            setupUIAndListeners(); // Listenerları yalnız auth uğurlu olduqdan sonra qoş
 
         } catch (error) {
             console.error("Oyunlar JS: Auth yoxlama xətası:", error);
             alert("Sessiya yoxlanılarkən xəta baş verdi. Giriş səhifəsinə yönləndirilirsiniz.");
             window.location.href = '/ana_sehife/login/login.html';
         }
-    }, 500); // <<<--- 500 millisaniyə (yarım saniyə) gözləmə müddəti
+    }, 500);
     // =====================================================
 
-    // --- UI və Olay Dinləyicilərini Quraşdırma Funksiyası ---
-    function setupUIAndListeners() {
-        if (!loggedInUser) return; // Ehtiyat üçün yoxlama
 
-        // Xoş gəldin mesajı
-        if (welcomePlayerSpan) {
-            welcomePlayerSpan.innerHTML = `Xoş gəldin, <strong>${escapeHtml(loggedInUser.nickname)}</strong>!`;
-        }
+   // --- UI və Olay Dinləyicilərini Quraşdırma Funksiyası (TƏK VERSİYA) ---
+function setupUIAndListeners() {
+    if (!loggedInUser) {
+        console.warn("setupUIAndListeners çağırıldı amma loggedInUser yoxdur!");
+        return;
+    }
+    console.log("UI və Listenerlar quraşdırılır (sadə remove/add üsulu)...");
 
-        // Listenerlar
-        if (logoutBtn) {
-            logoutBtn.removeEventListener('click', handleLogout); // Köhnə listenerı sil (əgər varsa)
-            logoutBtn.addEventListener('click', handleLogout);
-        } else { console.error("Logout düyməsi tapılmadı!"); }
-
-        if (editProfileBtn && editProfileModal) {
-            editProfileBtn.removeEventListener('click', openProfileModal); // Köhnə listenerı sil
-            editProfileBtn.addEventListener('click', openProfileModal);
-        } else { console.error("Profil düyməsi və ya modalı tapılmadı!"); }
-
-        if (closeEditModalBtn) {
-            closeEditModalBtn.removeEventListener('click', closeProfileModal); // Köhnə listenerı sil
-            closeEditModalBtn.addEventListener('click', closeProfileModal);
-        }
-
-        if (editProfileForm) {
-            editProfileForm.removeEventListener('submit', handleProfileUpdate); // Köhnə listenerı sil
-            editProfileForm.addEventListener('submit', handleProfileUpdate);
-        } else { console.error("Profil formu tapılmadı!"); }
-
-        // Modal xaricinə klikləmə (bu listener təkrar əlavə olunmamalıdır)
-        // Bunu ya bir dəfə əlavə edin, ya da əmin olun ki, təkrar olunmur.
-        // window.addEventListener('click', (event) => { ... });
-
-        console.log("Oyunlar JS UI və Listenerlar quraşdırıldı.");
+    // --- Xoş gəldin mesajı ---
+    if (welcomePlayerSpan) {
+        welcomePlayerSpan.innerHTML =
+            `Xoş gəldin, <strong>${escapeHtml(loggedInUser.nickname)}</strong>!`;
+    } else {
+        console.error("welcomePlayerSpan elementi tapılmadı!");
     }
 
+    // --- Logout düyməsinə listener ---
+    if (logoutBtn) {
+        logoutBtn.removeEventListener('click', handleLogout);
+        logoutBtn.addEventListener('click', handleLogout);
+        console.log("Logout düyməsinə listener qoşuldu.");
+    } else {
+        console.error("Logout düyməsi tapılmadı!");
+    }
+
+    // --- Profili Düzənlə düyməsinə listener ---
+    if (editProfileBtn && editProfileModal) {
+        editProfileBtn.removeEventListener('click', openProfileModal);
+        editProfileBtn.addEventListener('click', openProfileModal);
+        console.log("Profil redaktə düyməsinə listener qoşuldu.");
+    } else {
+        console.error("Profil redaktə düyməsi (editProfileBtn) və ya modal (editProfileModal) tapılmadı!");
+    }
+
+    // --- Ləğv Et düyməsinə listener ---
+    if (cancelProfileBtn) {
+        cancelProfileBtn.removeEventListener('click', closeProfileModal);
+        cancelProfileBtn.addEventListener('click', closeProfileModal);
+        console.log("Ləğv Et düyməsinə listener qoşuldu.");
+    } else {
+        console.error("cancelProfileBtn tapılmadı!");
+    }
+
+    // --- Modal-un bağlanması üçün × düyməsinə listener ---
+    if (closeEditModalBtn) {
+        closeEditModalBtn.removeEventListener('click', closeProfileModal);
+        closeEditModalBtn.addEventListener('click', closeProfileModal);
+        console.log("× düyməsinə listener qoşuldu.");
+    } else {
+        console.error("closeEditModalBtn tapılmadı!");
+    }
+
+    // --- Profil formunun submit listener-i ---
+    if (editProfileForm) {
+        editProfileForm.removeEventListener('submit', handleProfileUpdate);
+        editProfileForm.addEventListener('submit', handleProfileUpdate);
+        console.log("Profil formuna submit listener qoşuldu.");
+    } else {
+        console.error("Profil formu tapılmadı!");
+    }
+
+    console.log("Oyunlar JS UI və Listenerlar quraşdırılması tamamlandı.");
+} // setupUIAndListeners funksiyasının sonu
 
     // --- Olay Dinləyici Funksiyaları ---
 
+    // --- handleLogout funksiyası (Təsdiq + Animasiya + Gecikmə ilə) ---
     async function handleLogout() {
-        console.log("Çıxış edilir...");
-        try {
-            const response = await fetch('/logout', { method: 'POST', credentials: 'include' });
-            const result = await response.json();
-            if (response.ok) {
-                console.log("Uğurla çıxış edildi."); window.location.href = '../../ana_sehife/login/login.html';
-            } else { console.error("Çıxış xətası:", result.message); alert(`Çıxış zamanı xəta: ${result.message || 'Naməlum xəta'}`); }
-        } catch (error) { console.error("Çıxış fetch xətası:", error); alert("Serverlə əlaqə qurmaq mümkün olmadı."); }
-    }
+        console.log("Çıxış düyməsi basıldı...");
 
+        if (!confirm("Çıxış etmək istədiyinizə əminsinizmi?")) {
+            console.log("Çıxış ləğv edildi.");
+            return;
+        }
+        console.log("Çıxış təsdiqləndi, proses başlayır...");
+
+        if (loadingOverlay) {
+            loadingOverlay.classList.add('visible');
+            console.log("Animasiya overlay göstərildi.");
+        } else {
+            console.warn("Mövcud animasiya overlay elementi ('loading-overlay' ID-li?) tapılmadı!");
+        }
+
+        try {
+            const response = await fetch('/api/auth/logout', {
+                method: 'POST',
+                credentials: 'include'
+            });
+
+            let result;
+            try {
+                result = await response.json();
+            } catch (jsonError) {
+                console.error("Çıxış cavabı JSON deyil:", response.status, response.statusText);
+                if (loadingOverlay) loadingOverlay.classList.remove('visible');
+                alert(`Çıxış zamanı serverdən gözlənilməz cavab alındı (${response.status}).`);
+                return;
+            }
+
+            if (response.ok) {
+                console.log("Uğurla çıxış edildi.");
+                const logoutDelay = 2000;
+                console.log(`${logoutDelay}ms sonra giriş səhifəsinə yönləndirilir...`);
+                setTimeout(() => {
+                    window.location.href = '/ana_sehife/login/login.html';
+                }, logoutDelay);
+            } else {
+                console.error("Çıxış xətası (server):", result.message);
+                if (loadingOverlay) loadingOverlay.classList.remove('visible');
+                alert(`Çıxış zamanı xəta: ${result.message || 'Naməlum xəta'}`);
+            }
+        } catch (error) {
+            console.error("Çıxış fetch xətası:", error);
+            if (loadingOverlay) loadingOverlay.classList.remove('visible');
+            alert("Serverlə əlaqə qurmaq mümkün olmadı.");
+        }
+    } // handleLogout sonu
+
+
+    // --- Profil Modal Funksiyaları ---
     function openProfileModal() {
         if (!loggedInUser) return;
         console.log("Profil modalı açılır...");
-        if(editFullNameInput) editFullNameInput.value = loggedInUser.fullName || '';
-        if(editEmailInput) editEmailInput.value = loggedInUser.email || '';
-        if(editNicknameInput) editNicknameInput.value = loggedInUser.nickname || '';
-        if(editPasswordInput) editPasswordInput.value = '';
-        if(editConfirmPasswordInput) editConfirmPasswordInput.value = '';
-        if(editProfileMessage) { editProfileMessage.textContent = ''; editProfileMessage.removeAttribute('style'); } // Stili də təmizlə
-        if(currentNicknameInput) currentNicknameInput.value = loggedInUser.nickname;
+        if (editFullNameInput) editFullNameInput.value = loggedInUser.fullName || '';
+        if (editEmailInput) editEmailInput.value = loggedInUser.email || '';
+        if (editNicknameInput) editNicknameInput.value = loggedInUser.nickname || '';
+        if (editPasswordInput) editPasswordInput.value = '';
+        if (editConfirmPasswordInput) editConfirmPasswordInput.value = '';
+        if (editProfileMessage) { editProfileMessage.textContent = ''; editProfileMessage.className = 'message'; editProfileMessage.removeAttribute('style'); } // Stili də təmizlə
+        if (currentNicknameInput) currentNicknameInput.value = loggedInUser.nickname; // Hidden input üçün
+        if (saveProfileButton) saveProfileButton.disabled = false; // Düyməni aktiv et
         showModal(editProfileModal);
     }
 
-    function closeProfileModal() { hideModal(editProfileModal); }
+    function closeProfileModal() {
+        hideModal(editProfileModal);
+    }
 
+    // --- Profil Yeniləmə Handler ---
     async function handleProfileUpdate(event) {
         event.preventDefault();
         if (!loggedInUser || !editProfileForm || !saveProfileButton) return;
 
-        const currentNickname = loggedInUser.nickname;
+        const currentNickname = loggedInUser.nickname; // Serverə göndərmək üçün
         const password = editPasswordInput.value;
         const confirmPassword = editConfirmPasswordInput.value;
 
-        // Validasiya
-        if (password !== confirmPassword) { showMsg(editProfileMessage, 'Yeni şifrələr eyni deyil.'); return; }
-        if (password && password.length < 6) { showMsg(editProfileMessage, 'Yeni şifrə min. 6 simvol olmalıdır.'); return; }
+        // --- Validasiya ---
+        if (password !== confirmPassword) { showMsg(editProfileMessage, 'Yeni şifrələr eyni deyil.', 'error'); return; }
+        if (password && password.length < 6) { showMsg(editProfileMessage, 'Yeni şifrə min. 6 simvol olmalıdır.', 'error'); return; }
+
         const newNickname = editNicknameInput.value.trim();
         const email = editEmailInput.value.trim();
         const fullName = editFullNameInput.value.trim();
-        if (!fullName || !email || !newNickname) { showMsg(editProfileMessage, 'Ad Soyad, Email və Nickname boş ola bilməz.'); return; }
-        if (/\s/.test(newNickname)) { showMsg(editProfileMessage, 'Nickname boşluq ehtiva edə bilməz.'); return; }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showMsg(editProfileMessage, 'Düzgün e-poçt ünvanı daxil edin.'); return; }
+
+        if (!fullName || !email || !newNickname) { showMsg(editProfileMessage, 'Ad Soyad, Email və Nickname boş ola bilməz.', 'error'); return; }
+        if (/\s/.test(newNickname)) { showMsg(editProfileMessage, 'Nickname boşluq ehtiva edə bilməz.', 'error'); return; }
+        if (newNickname.length < 3) { showMsg(editProfileMessage, 'Nickname minimum 3 hərf olmalıdır.', 'error'); return; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showMsg(editProfileMessage, 'Düzgün e-poçt ünvanı daxil edin.', 'error'); return; }
+        // --- Validasiya Sonu ---
 
         saveProfileButton.disabled = true;
         showMsg(editProfileMessage, 'Yenilənir...', 'info');
 
-        const formData = { fullName, email, nickname: newNickname, password: password || undefined };
+        // Serverə göndəriləcək data
+        const formData = {
+            fullName,
+            email,
+            nickname: newNickname, // Yeni nickname göndərilir
+            password: password || undefined // Yalnız dolu olduqda göndər
+        };
 
         try {
-            const response = await fetch(`/profile/${currentNickname}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, credentials: 'include', body: JSON.stringify(formData) });
+            // URL-də mövcud nickname istifadə olunur
+            const response = await fetch(`/api/auth/profile/${encodeURIComponent(currentNickname)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(formData)
+            });
             const result = await response.json();
+
             if (response.ok) {
                 showMsg(editProfileMessage, result.message || 'Profil uğurla yeniləndi!', 'success');
                 loggedInUser = result.updatedUser || loggedInUser; // Lokal user datasını yenilə
+                // Header-dəki adı yenilə
                 if (welcomePlayerSpan) { welcomePlayerSpan.innerHTML = `Xoş gəldin, <strong>${escapeHtml(loggedInUser.nickname)}</strong>!`; }
-                setTimeout(closeProfileModal, 1500);
-            } else { showMsg(editProfileMessage, result.message || 'Profil yenilənərkən xəta.', 'error'); }
-        } catch (error) { console.error('Profil yeniləmə fetch xətası:', error); showMsg(editProfileMessage, 'Serverlə əlaqə mümkün olmadı.', 'error');
-        } finally { saveProfileButton.disabled = false; }
-    }
+                // Nickname dəyişibsə, hidden inputu da yenilə (növbəti redaktə üçün)
+                if (currentNicknameInput) currentNicknameInput.value = loggedInUser.nickname;
 
-     // Modal xaricinə klikləmə listenerı (bir dəfə əlavə olunur)
-     window.addEventListener('click', (event) => {
-         if (event.target == editProfileModal) { closeProfileModal(); }
-     });
+                closeProfileModal();
+            } else {
+                // Serverdən gələn xəta mesajını göstər
+                showMsg(editProfileMessage, result.message || 'Profil yenilənərkən xəta.', 'error');
+            }
+        } catch (error) {
+            console.error('Profil yeniləmə fetch xətası:', error);
+            showMsg(editProfileMessage, 'Serverlə əlaqə mümkün olmadı.', 'error');
+        } finally {
+            // Düyməni yenidən aktiv et
+            if (saveProfileButton) saveProfileButton.disabled = false;
+        }
+    } // handleProfileUpdate sonu
+
+    // Modal xaricinə klikləmə listenerı (qlobal olaraq bir dəfə qoşulur)
+    window.addEventListener('click', (event) => {
+        if (editProfileModal && event.target == editProfileModal) {
+            closeProfileModal();
+        }
+    });
 
     console.log("Oyunlar JS ilkin quraşdırma bitdi.");
 

@@ -1,38 +1,61 @@
 @echo off
+setlocal
 cls
-echo =================================
-echo == Git ve Fly.io Deployment ==
-echo =================================
+
+echo ================================
+echo ==  Git & Fly.io Deployment   ==
+echo ================================
 echo.
 
-echo Butun deyisiklikler elave edilir (git add .)...
+:: Başlanğıc diaqnostika
+echo Skript başladıldı, davam etmək üçün bir düymə basın...
+pause
+
+:: 1) Git add
+echo [1/5] git add . ...
 git add .
-echo.
+if errorlevel 1 (
+    echo [Xəta] git add mərhələsində problem yarandı.
+    goto END
+)
 
-echo Deyisiklikler commit edilir...
-rem === XEBARDARLIQ: Commit mesaji hemise eyni olacaq! ===
-git commit -m "Update project code"
-echo.
+:: 2) Commit
+for /f "tokens=1-3 delims=/ " %%a in ('date /t') do set D=%%a-%%b-%%c
+for /f "tokens=1-2 delims=:." %%a in ('echo %time%') do set T=%%a%%b
+set DT=%D%_%T%
 
-echo GitHub-a gonderilir (git push origin main)...
+echo.
+echo [2/5] git commit -m "Deploy %DT%" ...
+git commit -m "Deploy %DT%"
+if errorlevel 1 (
+    echo [Xəta] git commit mərhələsində problem.
+    goto END
+)
+
+:: 3) Push
+echo.
+echo [3/5] git push origin main ...
 git push origin main
-echo.
+if errorlevel 1 (
+    echo [Xəta] git push mərhələsində problem.
+    goto END
+)
 
-echo =================================
-echo == Fly.io Deployment Basladilir ==
-echo =================================
-echo Fly.io-ya deploy edilir (flyctl deploy)...
-rem === Flyctl yolunu ve app adini yoxlayin ===
-"C:\Users\nesib\.fly\bin\flyctl.exe" deploy -a kingzone
+:: 4) Fly.io deploy
 echo.
+echo [4/5] flyctl deploy -a kingzone ...
+flyctl deploy -a kingzone
+if errorlevel 1 (
+    echo [Xəta] flyctl deploy mərhələsində problem.
+    goto END
+)
 
-echo ===============================
-echo == Fly.io Loglari Gosterilir ==
-echo ===============================
-echo Loglari dayandirmaq ucun Ctrl+C basin.
-rem === Flyctl yolunu ve app adini yoxlayin ===
-"C:\Users\nesib\.fly\bin\flyctl.exe" logs -a kingzone
-
+:: 5) Fly.io logs
 echo.
-echo Emeliyyatlar bitdi (Loglardan sonra gorunecek).
+echo [5/5] flyctl logs -a kingzone (stop üçün Ctrl+C)...
+flyctl logs -a kingzone
+
+:END
+echo.
+echo Skript bitdi. Pəncərəni bağlamaq üçün bir düymə basın...
 pause
